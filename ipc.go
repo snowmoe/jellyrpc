@@ -10,7 +10,7 @@ import (
 	"path/filepath"
 )
 
-// originally an llm just spewed this out, but I was lowkey pissed I
+// the original (commit 156f064) code an llm just spewed this out, but I was lowkey pissed I
 // didn't understand it so went through along side docs and annotated
 // EVERYTHING, hence the fuck ton of comments everywhere
 // but hey, I understand it now and it's actually quite interesting, worth reading through
@@ -174,7 +174,7 @@ func (dc *DiscordConn) SetWatching(title, status string, startEpoch, endEpoch in
 		Args: Args{
 			PID: os.Getpid(),
 			Activity: Activity{
-				Type:     3, // sets the activity type to watching
+				Type:     3,
 				Details:  title,
 				State:    status,
 				Instance: true,
@@ -198,6 +198,27 @@ func (dc *DiscordConn) SetWatching(title, status string, startEpoch, endEpoch in
 		return err
 	}
 
+	return dc.send(1, payloadJSON)
+}
+
+// simeple func to set a "paused" state
+// attempted to try send an empty SET_ACTIVITY but that doesn't
+// clear the rpc activity, instead fallsback to something adhoc
+func (dc *DiscordConn) SetPaused(title string) error {
+	p := Payload{
+		Cmd:   "SET_ACTIVITY",
+		Nonce: "1",
+		Args: Args{
+			PID: os.Getpid(),
+			Activity: Activity{
+				Type:     3,
+				Details:  title,
+				State:    "Paused",
+				Instance: true,
+			},
+		},
+	}
+	payloadJSON, _ := json.Marshal(p)
 	return dc.send(1, payloadJSON)
 }
 
