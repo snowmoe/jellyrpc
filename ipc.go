@@ -156,7 +156,7 @@ func (dc *DiscordConn) send(opcode uint32, payload []byte) error {
 // that's where the cool byte level shit ends, now it's just boring rpc shit..
 // of which I haven't commented much because it's pretty simple to understand
 
-func (dc *DiscordConn) SetWatching(title, status string, startEpoch, endEpoch int64) error {
+func (dc *DiscordConn) SetWatching(title, status, arturl string, startEpoch, endEpoch int64) error {
 	// if the title or status are emtpy just send an empty activity to clear
 	if title == "" && status == "" {
 		p := Payload{
@@ -179,8 +179,8 @@ func (dc *DiscordConn) SetWatching(title, status string, startEpoch, endEpoch in
 				State:    status,
 				Instance: true,
 				Assets: &Assets{
-					LargeImage: "jellyfin",
-					LargeText:  "Jellyfin",
+					LargeImage: arturl,
+					LargeText:  "jellyrpc",
 				},
 			},
 		},
@@ -204,7 +204,7 @@ func (dc *DiscordConn) SetWatching(title, status string, startEpoch, endEpoch in
 // simeple func to set a "paused" state
 // attempted to try send an empty SET_ACTIVITY but that doesn't
 // clear the rpc activity, instead fallsback to something adhoc
-func (dc *DiscordConn) SetPaused(title string) error {
+func (dc *DiscordConn) SetPaused(title, arturl string) error {
 	p := Payload{
 		Cmd:   "SET_ACTIVITY",
 		Nonce: "1",
@@ -215,6 +215,10 @@ func (dc *DiscordConn) SetPaused(title string) error {
 				Details:  title,
 				State:    "Paused",
 				Instance: true,
+				Assets: &Assets{
+					LargeImage: arturl,
+					LargeText:  "jellyrpc",
+				},
 			},
 		},
 	}

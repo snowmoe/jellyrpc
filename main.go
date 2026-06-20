@@ -63,6 +63,8 @@ func main() {
 			continue
 		}
 
+		fmt.Println(sess)
+
 		if dc == nil {
 			fmt.Println("active jf session detected, reopening ipc socket")
 			dc, err = NewDiscordConn(applicationID)
@@ -73,8 +75,13 @@ func main() {
 			}
 		}
 
+		artworkURL := fmt.Sprintf("%s/Items/%s/Images/Primary?fillWidth=400&quality=85",
+			cfg.JellyfinURL,
+			sess.NowPlayingItem.Id,
+		)
+
 		if sess.PlayState.IsPaused {
-			err := dc.SetPaused(sess.NowPlayingItem.Name)
+			err := dc.SetPaused(sess.NowPlayingItem.Name, artworkURL)
 			if err != nil {
 				fmt.Printf("failed updating discord status: %v\n", err)
 			}
@@ -96,7 +103,7 @@ func main() {
 			// then we set our activity status using the current playing item + epochs we calculated
 			// TODO fetch the status correctly (e.g. EP no + ep name for series, and/or something adhoc for movies)
 			// TODO fetch and add cover art for media
-			err = dc.SetWatching(sess.NowPlayingItem.Name, "test", startEpoch, endEpoch)
+			err = dc.SetWatching(sess.NowPlayingItem.Name, "test", artworkURL, startEpoch, endEpoch)
 			if err != nil {
 				fmt.Println(err)
 				return
