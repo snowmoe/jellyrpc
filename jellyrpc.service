@@ -1,0 +1,12 @@
+[Unit]
+Description=simple jellyfin discord rpc daemon
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=%h/.local/bin/jellyrpc
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target
