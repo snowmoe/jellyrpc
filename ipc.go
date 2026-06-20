@@ -201,30 +201,12 @@ func (dc *DiscordConn) SetWatching(title, status string, startEpoch, endEpoch in
 	return dc.send(1, payloadJSON)
 }
 
-// func to clear + close our rpc activity
-// we chain and empty activity to clear the rpc activity from our profiel
-// then an opcode 2 payload after, should stop a ghost activity in theory
+// just close the socket connection without sending an
+// empty payload or opcode 2
 func (dc *DiscordConn) Close() {
 	if dc.conn != nil {
-		// send an empty SET_ACTIVITY to clear status
-		// since discord doesn't have any "STOP_ACTIVITY" cmd
-		// although I just found opcode 2 exists so maybe slap that after(?)
-		p := Payload{
-			Cmd:   "SET_ACTIVITY",
-			Nonce: "1",
-			Args:  Args{PID: os.Getpid()},
-		}
-		payloadJSON, _ := json.Marshal(p)
-		// send with opcode 1
-		dc.send(1, payloadJSON)
-
-		// after sending emtpy opcode 1 to clear activity
-		// send a proper opcode 2 payload with code 1000 (see lin)
-		// https://docs.discord.food/topics/rpc#rpc-close-codes
-		closePayload := []byte(`{"code":1000,"message":"bye bye"}`)
-		dc.send(2, closePayload)
-
 		// close the actual socket connection
 		dc.conn.Close()
+		dc.conn = nil
 	}
 }
