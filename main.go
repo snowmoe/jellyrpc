@@ -8,7 +8,7 @@ import (
 )
 
 // TODO add config to set consts
-// later probably a way to replace the adhoc app id
+// TODO add optional config opt to override the app id
 const (
 	jellyfinURL   = ""
 	apiKey        = ""
@@ -27,49 +27,74 @@ type Session struct {
 		RunTimeTicks int64  `json:"RunTimeTicks"`
 	} `json:"NowPlayingItem"`
 	PlayState struct {
+		IsPaused      bool  `json:"IsPaused"`
 		PositionTicks int64 `json:"PositionTicks"`
 	} `json:"PlayState"`
 }
 
 func main() {
-	// initalise our rpc over ipc socket
-	dc, err := NewDiscordConn(applicationID)
-	if err != nil {
-		fmt.Println(err)
+	fmt.Println("starting jellyfin rpc daemon")
+
+	ticker := time.NewTicker(5 * time.Second)
+	defer ticker.Stop()
+
+	var dc *DiscordConn
+
+	for range ticker.C {
+		sess, err := getJellyfinSessions()
+		if err != nil || !isSessionActive(sess) {
+			if err != nil {
+				fmt.Printf("jellyfin api err: %v\n", err)
+			}
+
+			if dc != nil {
+				fmt.Println("no active jf sessions, closing ipc socket")
+				dc.Close()
+				dc = nil
+			}
+			continue
+		}
+
+		if dc == nil {
+			fmt.Println("active jf session detected, reopening ipc socket")
+			dc, err = NewDiscordConn(applicationID)
+			if err != nil {
+				fmt.Printf("failed to connect: %v\n", err)
+				dc = nil
+				continue
+			}
+		}
+
+		if sess.PlayState.IsPaused {
+			err := dc.SetPaused(sess.NowPlayingItem.Name)
+			if err != nil {
+				fmt.Printf("failed updating discord status: %v\n", err)
+			}
+		} else {
+			// to have a time bar in our rpc activity we need a start and end epoch
+			// and the current time along that is calculated from our now time epoch (by discord)
+			// so in order for our time bar to be correct we need to
+			// subtract the current position from our current time
+
+			currentPosSec := sess.PlayState.PositionTicks / 10000000
+			totalRunSec := sess.NowPlayingItem.RunTimeTicks / 10000000
+
+			now := time.Now().UnixMilli()
+			remainingSec := totalRunSec - currentPosSec
+
+			startEpoch := now - (currentPosSec * 1000)
+			endEpoch := now + (remainingSec * 1000)
+
+			// then we set our activity status using the current playing item + epochs we calculated
+			// TODO fetch the status correctly (e.g. EP no + ep name for series, and/or something adhoc for movies)
+			// TODO fetch and add cover art for media
+			err = dc.SetWatching(sess.NowPlayingItem.Name, "test", startEpoch, endEpoch)
+			if err != nil {
+				fmt.Println(err)
+				return
+			}
+		}
 	}
-	// defer with the close method which should stop activities cleanly
-	defer dc.Close()
-
-	sess, err := getJellyfinSessions()
-	if err != nil {
-		panic(err)
-	}
-
-	// to have a time bar in our rpc activity we need a start and end epoch
-	// and the current time along that is calculated from our now time epoch (by discord)
-	// so in order for our time bar to be correct we need to
-	// subtract the current position from our current time
-
-	currentPosSec := sess.PlayState.PositionTicks / 10000000
-	totalRunSec := sess.NowPlayingItem.RunTimeTicks / 10000000
-
-	now := time.Now().UnixMilli()
-	remainingSec := totalRunSec - currentPosSec
-
-	startEpoch := now - (currentPosSec * 1000)
-	endEpoch := now + (remainingSec * 1000)
-
-	// then we set our activity status using the current playing item + epochs we calculated
-	// 2 big todos here are handling a paused session, and actually implementing and update
-	// loop, as rn discord will just display that we are watching through X movie or series, even if paused
-	// I also need to fetch the status correctly (e.g. EP no + ep name for series, and/or something adhoc for movies)
-	err = dc.SetWatching(sess.NowPlayingItem.Name, "test", startEpoch, endEpoch)
-	if err != nil {
-		fmt.Println(err)
-		return
-	}
-
-	fmt.Println(sess)
 }
 
 // very simple functon compared to the other ipc shit
@@ -96,4 +121,16 @@ func getJellyfinSessions() (*Session, error) {
 		}
 	}
 	return &Session{}, nil
+}
+
+func isSessionActive(sess *Session) bool {
+	if sess == nil {
+		return false
+	}
+
+	if sess.NowPlayingItem.Name == "" || sess.NowPlayingItem.Id == "" {
+		return false
+	}
+
+	return true
 }
