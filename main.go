@@ -4,17 +4,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os"
 	"time"
 )
 
-// TODO add config to set consts
 // TODO add optional config opt to override the app id
-const (
-	jellyfinURL   = ""
-	apiKey        = ""
-	username      = ""
-	applicationID = "1517892834907394229"
-)
+const applicationID = "1517892834907394229"
 
 // /Session endpoint json structure
 // https://api.jellyfin.org/#tag/Session/operation/GetSessions
@@ -33,6 +28,19 @@ type Session struct {
 }
 
 func main() {
+	configDir, err := os.UserConfigDir()
+	if err != nil {
+		fmt.Printf("error finding config dir: %v\n", err)
+		return
+	}
+
+	cfgPath := configDir + "/jellyrpc/config"
+	cfg, err := LoadConfig(cfgPath)
+	if err != nil {
+		fmt.Printf("error loading config file: %v\n", err)
+		return
+	}
+
 	fmt.Println("starting jellyfin rpc daemon")
 
 	ticker := time.NewTicker(5 * time.Second)
@@ -41,7 +49,7 @@ func main() {
 	var dc *DiscordConn
 
 	for range ticker.C {
-		sess, err := getJellyfinSessions()
+		sess, err := getJellyfinSessions(cfg)
 		if err != nil || !isSessionActive(sess) {
 			if err != nil {
 				fmt.Printf("jellyfin api err: %v\n", err)
@@ -100,9 +108,9 @@ func main() {
 // very simple functon compared to the other ipc shit
 // just call the GET /Sessions endpoint and unmarshal into our structs
 // making sure we only get the session for the specified user
-func getJellyfinSessions() (*Session, error) {
-	req, _ := http.NewRequest("GET", jellyfinURL+"/Sessions", nil)
-	req.Header.Set("X-MediaBrowser-Token", apiKey)
+func getJellyfinSessions(cfg *Config) (*Session, error) {
+	req, _ := http.NewRequest("GET", cfg.JellyfinURL+"/Sessions", nil)
+	req.Header.Set("X-MediaBrowser-Token", cfg.JellyfinToken)
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
@@ -116,7 +124,7 @@ func getJellyfinSessions() (*Session, error) {
 	}
 
 	for _, s := range sessions {
-		if s.UserName == username && s.NowPlayingItem.Name != "" {
+		if s.UserName == cfg.JellyfinUser && s.NowPlayingItem.Name != "" {
 			return &s, nil
 		}
 	}
