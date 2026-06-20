@@ -4,7 +4,11 @@ a simple jellyfin discord rpc daemon written in golang
 
 wrote this because I was originally going to fork one of the existing solutions for this and make tweaks to suit my needs, but I came to the conclusion it was far easier to just rewrite it (and in a language I prefer)
 
-<img src="images/movie.png" /><img src="images/series.png" />
+<p align="center">
+  <img src="images/movie.png" width="48%" />
+  <img src="images/series.png" width="48%" />  
+</p>
+
 
 ```
 features:
