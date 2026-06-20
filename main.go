@@ -63,8 +63,6 @@ func main() {
 			continue
 		}
 
-		fmt.Println(sess)
-
 		if dc == nil {
 			fmt.Println("active jf session detected, reopening ipc socket")
 			dc, err = NewDiscordConn(applicationID)
