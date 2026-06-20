@@ -15,16 +15,22 @@ const applicationID = "1517892834907394229"
 // https://api.jellyfin.org/#tag/Session/operation/GetSessions
 type Session struct {
 	UserName       string `json:"UserName"`
-	NowPlayingItem struct {
-		Name         string `json:"Name"`
-		Id           string `json:"Id"`
-		Type         string `json:"Type"`
-		RunTimeTicks int64  `json:"RunTimeTicks"`
-	} `json:"NowPlayingItem"`
-	PlayState struct {
+	NowPlayingItem `json:"NowPlayingItem"`
+	PlayState      struct {
 		IsPaused      bool  `json:"IsPaused"`
 		PositionTicks int64 `json:"PositionTicks"`
 	} `json:"PlayState"`
+}
+
+type NowPlayingItem struct {
+	Name              string `json:"Name"`
+	Id                string `json:"Id"`
+	Type              string `json:"Type"`
+	RunTimeTicks      int64  `json:"RunTimeTicks"`
+	SeriesName        string `json:"SeriesName,omitempty"`
+	SeriesId          string `json:"SeriesId,omitempty"`
+	ParentIndexNumber int    `json:"ParentIndexNumber,omitempty"`
+	IndexNumber       int    `json:"IndexNumber,omitempty"`
 }
 
 func main() {
@@ -73,13 +79,34 @@ func main() {
 			}
 		}
 
+		var rpcTitle, rpcState, targetImageID string
+
+		if sess.NowPlayingItem.Type == "Episode" {
+			rpcTitle = sess.NowPlayingItem.SeriesName
+			rpcState = fmt.Sprintf("S%02d:E%02d - %s",
+				sess.NowPlayingItem.ParentIndexNumber,
+				sess.NowPlayingItem.IndexNumber,
+				sess.NowPlayingItem.Name,
+			)
+
+			if sess.NowPlayingItem.SeriesId != "" {
+				targetImageID = sess.NowPlayingItem.SeriesId
+			} else {
+				targetImageID = sess.NowPlayingItem.Id
+			}
+		} else {
+			rpcTitle = sess.NowPlayingItem.Name
+			rpcState = ""
+			targetImageID = sess.NowPlayingItem.Id
+		}
+
 		artworkURL := fmt.Sprintf("%s/Items/%s/Images/Primary?fillWidth=400&quality=85",
 			cfg.JellyfinURL,
-			sess.NowPlayingItem.Id,
+			targetImageID,
 		)
 
 		if sess.PlayState.IsPaused {
-			err := dc.SetPaused(sess.NowPlayingItem.Name, artworkURL)
+			err := dc.SetPaused(rpcTitle, artworkURL)
 			if err != nil {
 				fmt.Printf("failed updating discord status: %v\n", err)
 			}
@@ -101,7 +128,7 @@ func main() {
 			// then we set our activity status using the current playing item + epochs we calculated
 			// TODO fetch the status correctly (e.g. EP no + ep name for series, and/or something adhoc for movies)
 			// TODO fetch and add cover art for media
-			err = dc.SetWatching(sess.NowPlayingItem.Name, "test", artworkURL, startEpoch, endEpoch)
+			err = dc.SetWatching(rpcTitle, rpcState, artworkURL, startEpoch, endEpoch)
 			if err != nil {
 				fmt.Println(err)
 				return
