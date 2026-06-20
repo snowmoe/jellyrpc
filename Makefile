@@ -19,6 +19,10 @@ install: build
 	@echo "installing systemd user service"
 	cp $(BINARY_NAME).service $(SYSTEMD_DIR)/$(BINARY_NAME).service
 
+	@echo "setting up config"
+	mkdir -p $(HOME)/.config/jellyrpc
+	cp -n config.example $(HOME)/.config/jellyrpc/config
+
 	@echo "reloading systemd user daemon"
 	systemctl --user daemon-reload
 
