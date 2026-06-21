@@ -9,7 +9,7 @@ a simple jellyfin discord rpc daemon written in golang
 
 supports local and public jellyfin instances, and doesn't require any extra api keys for cover art support on local instances
 
-```
+```md
 features:
   - lightweight
   - cover art fetching
@@ -22,7 +22,7 @@ features:
 
 > requires `go` and `make`
 
-```
+```bash
 git clone https://github.com/reckedpr/jellyrpc
 
 cd jellyrpc
@@ -53,3 +53,34 @@ if you have any problems run `journalctl --user -u jellyrpc -n 30` and/or make a
 #### optional settings
 
 - `POLL_RATE` can be set to an integer(>0) to set how often the daemon will poll in seconds
+
+#### manual install
+
+installing manually depends on how you plan to run the daemon as a service, but you can get running by:
+
+```bash
+git clone https://github.com/reckedpr/jellyrpc
+
+cd jellyrpc
+
+go build -ldflags="-s -w"
+
+# copy the example config
+mkdir -p ~/.config/jellyrpc
+
+cp ./config.example ~/.config/jellyrpc/config
+
+# run the binary
+./jellyrpc
+
+```
+
+### update
+
+to update run
+
+```bash
+git pull && make install
+```
+
+or if installed manually then `git pull` and rebuild as needed
