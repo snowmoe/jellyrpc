@@ -1,2 +1,5 @@
 - music support
 - nix flake + home manager module
+- allow user token instead of api key
+- textless cover art option
+- add config option for discord app id
