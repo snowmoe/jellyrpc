@@ -2,17 +2,16 @@
 
 a simple jellyfin discord rpc daemon written in golang
 
-wrote this because I was originally going to fork one of the existing solutions for this and make tweaks to suit my needs, but I came to the conclusion it was far easier to just rewrite it (and in a language I prefer)
-
 <p align="center">
   <img src="images/movie.png" width="48%" />
   <img src="images/series.png" width="48%" />  
 </p>
 
+supports local and public jellyfin instances, and doesn't require any extra api keys for cover art support on local instances
 
 ```
 features:
-  - configuration file
+  - lightweight
   - cover art fetching
   - pause state handling
   - efficient socket mgmt
@@ -30,6 +29,10 @@ cd jellyrpc
 
 make install
 ```
+
+the makefile install only supports unix like systemd operating systems, daemon can run on non sytemd systems but will require manual service setup (e.g. on openrc, runit, etc.)
+
+should run on macos but untested, no support for windows
 
 #### config
 
