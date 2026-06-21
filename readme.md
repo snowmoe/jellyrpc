@@ -33,9 +33,11 @@ make install
 
 #### config
 
-edit the config file at `~/.config/jellyrpc/config` (the makefile should create this automatically)
+edit the config file at `~/.config/jellyrpc/config` 
 
-edit the following values:
+*the makefile should create this automatically, or use the `config.example` file in this repo*
+
+set/edit the following values:
 
 - `JELLYFIN_URL` with your jellyfin instance, ensuring you include the protocol
 - `JELLYFIN_KEY` with an api key generated under dashboard > api keys
@@ -43,4 +45,8 @@ edit the following values:
 
 now you can run `systemctl --user enable --now jellyrpc` to start the daemon
 
-if you have any problems run `journalctl --user -u jellyrpc -n 20` and make an issue
+if you have any problems run `journalctl --user -u jellyrpc -n 30` and/or make an issue
+
+#### optional settings
+
+- `POLL_RATE` can be set to an integer(>0) to set how often the daemon will poll in seconds
