@@ -32,7 +32,7 @@ type NowPlayingItem struct {
 // making sure we only get the session for the specified user
 func getJellyfinSessions(cfg *Config) (*Session, error) {
 	req, _ := http.NewRequest("GET", cfg.JellyfinURL+"/Sessions", nil)
-	req.Header.Set("X-MediaBrowser-Token", cfg.JellyfinToken)
+	req.Header.Set("X-MediaBrowser-Token", cfg.JellyfinKey)
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {

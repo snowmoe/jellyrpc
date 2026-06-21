@@ -33,7 +33,7 @@ func main() {
 
 	// check if required config options have values
 	// TODO use another jellyfin endpoint to verify values before polling?
-	if cfg.JellyfinToken == "" || cfg.JellyfinURL == "" || cfg.JellyfinUser == "" {
+	if cfg.JellyfinKey == "" || cfg.JellyfinURL == "" || cfg.JellyfinUser == "" {
 		log.Fatalln("config file missing values")
 	} else {
 		log.Println("loaded config file")

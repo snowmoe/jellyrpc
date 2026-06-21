@@ -10,9 +10,9 @@ import (
 // since I wanted no deps I just split key and val with =, trim spaces, and pray
 
 type Config struct {
-	JellyfinURL   string
-	JellyfinToken string
-	JellyfinUser  string
+	JellyfinURL  string
+	JellyfinKey  string
+	JellyfinUser string
 }
 
 func LoadConfig(path string) (*Config, error) {
@@ -43,8 +43,8 @@ func LoadConfig(path string) (*Config, error) {
 		switch key {
 		case "JELLYFIN_URL":
 			cfg.JellyfinURL = val
-		case "JELLYFIN_TOKEN":
-			cfg.JellyfinToken = val
+		case "JELLYFIN_KEY":
+			cfg.JellyfinKey = val
 		case "JELLYFIN_USER":
 			cfg.JellyfinUser = val
 		}

@@ -38,7 +38,7 @@ edit the config file at `~/.config/jellyrpc/config` (the makefile should create 
 edit the following values:
 
 - `JELLYFIN_URL` with your jellyfin instance, ensuring you include the protocol
-- `JELLYFIN_TOKEN` with an api key generated under dashboard > api keys
+- `JELLYFIN_KEY` with an api key generated under dashboard > api keys
 - `JELLYFIN_USER` with the jellyfin username of who you want to use the status of
 
 now you can run `systemctl --user enable --now jellyrpc` to start the daemon
