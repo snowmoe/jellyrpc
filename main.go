@@ -34,13 +34,17 @@ func main() {
 	// check if required config options have values
 	// TODO use another jellyfin endpoint to verify values before polling?
 	if cfg.JellyfinKey == "" || cfg.JellyfinURL == "" || cfg.JellyfinUser == "" {
-		log.Fatalln("config file missing values")
+		log.Fatalln("config file missing required values")
 	} else {
 		log.Println("loaded config file")
 	}
 
-	// TODO config option to change polling rate
-	ticker := time.NewTicker(5 * time.Second)
+	if cfg.PollRate <= 0 {
+		log.Println("no poll rate set, using default (5s)")
+		cfg.PollRate = 5
+	}
+
+	ticker := time.NewTicker(time.Duration(cfg.PollRate) * time.Second)
 	defer ticker.Stop()
 
 	var dc *DiscordConn

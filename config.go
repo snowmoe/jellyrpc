@@ -2,7 +2,9 @@ package main
 
 import (
 	"bufio"
+	"log"
 	"os"
+	"strconv"
 	"strings"
 )
 
@@ -13,6 +15,7 @@ type Config struct {
 	JellyfinURL  string
 	JellyfinKey  string
 	JellyfinUser string
+	PollRate     int
 }
 
 func LoadConfig(path string) (*Config, error) {
@@ -47,6 +50,13 @@ func LoadConfig(path string) (*Config, error) {
 			cfg.JellyfinKey = val
 		case "JELLYFIN_USER":
 			cfg.JellyfinUser = val
+		case "POLL_RATE":
+			i, err := strconv.Atoi(val)
+			if err != nil {
+				log.Printf("failed to set poll rate from config: %v\n", err)
+				continue
+			}
+			cfg.PollRate = i
 		}
 	}
 

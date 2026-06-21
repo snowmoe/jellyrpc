@@ -1,3 +1,7 @@
+# required values
 JELLYFIN_URL=
 JELLYFIN_KEY=
 JELLYFIN_USER=
+
+# optional values, uncomment to use
+# POLL_RATE=3
