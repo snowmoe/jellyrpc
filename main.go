@@ -75,7 +75,7 @@ func main() {
 			}
 		}
 
-		var rpcTitle, rpcState, targetImageID string
+		var rpcTitle, targetImageID, rpcState, artworkURL string
 
 		// only logging when id changes, keeps shit tidy
 		if lastWatching != sess.NowPlayingItem.Id {
@@ -106,13 +106,27 @@ func main() {
 			targetImageID = sess.NowPlayingItem.Id
 		}
 
-		// after testing this will only work with a public jellyfin instance (duh)
-		// so may need a fallback to movie db, using a flag to avoid rechecking a
-		// jellyfin instances publicity every poll
-		artworkURL := fmt.Sprintf("%s/Items/%s/Images/Primary?fillWidth=400&quality=85",
-			cfg.JellyfinURL,
-			targetImageID,
-		)
+		// api "bridge" that lets me use an imdb or tvdb id
+		// fetches the imdb image link and 302's to that, with caching !!
+		// should let people with non pub instances still have rpc cover art
+		// without any need for them to provide api key + keeping mine secret hehehe
+		bridgeApi := "https://rot.sh/poster"
+
+		if IsLocalInstance(cfg.JellyfinURL) {
+			if sess.NowPlayingItem.ProviderIds.Imdb != "" {
+				artworkURL = fmt.Sprintf("%s?imdb=%s", bridgeApi, sess.NowPlayingItem.ProviderIds.Imdb)
+			} else if sess.NowPlayingItem.ProviderIds.Tvdb != "" {
+				artworkURL = fmt.Sprintf("%s?tvdb=%s", bridgeApi, sess.NowPlayingItem.ProviderIds.Tvdb)
+			} else {
+				// should just fallback to using the large image key
+				artworkURL = "jellyfin"
+			}
+		} else {
+			artworkURL = fmt.Sprintf("%s/Items/%s/Images/Primary?fillWidth=400&quality=85",
+				cfg.JellyfinURL,
+				targetImageID,
+			)
+		}
 
 		if sess.PlayState.IsPaused {
 			err := dc.SetPaused(rpcTitle, artworkURL)

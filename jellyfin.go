@@ -2,7 +2,10 @@ package main
 
 import (
 	"encoding/json"
+	"net"
 	"net/http"
+	"net/url"
+	"strings"
 )
 
 // /Session endpoint json structure
@@ -25,6 +28,13 @@ type NowPlayingItem struct {
 	SeriesId          string `json:"SeriesId,omitempty"`
 	ParentIndexNumber int    `json:"ParentIndexNumber,omitempty"`
 	IndexNumber       int    `json:"IndexNumber,omitempty"`
+	ProviderIds       `json:"ProviderIds"`
+}
+
+type ProviderIds struct {
+	Imdb string `json:"Imdb"`
+	Tmdb string `json:"Tmdb"`
+	Tvdb string `json:"Tvdb"`
 }
 
 // very simple functon compared to the other ipc shit
@@ -63,4 +73,28 @@ func isSessionActive(sess *Session) bool {
 	}
 
 	return true
+}
+
+// determines if the jellyfin instance url provided is local
+// checks if localhost or a .local domain
+// checks if ip (if parseable) is rfc1918 or loopback
+// still kept 127 and ::1 in the host check anyway but can possibly be removed
+func IsLocalInstance(hostURL string) bool {
+	u, err := url.Parse(hostURL)
+	if err != nil {
+		return true
+	}
+
+	host := u.Hostname()
+
+	if host == "localhost" || host == "127.0.0.1" || host == "::1" || strings.HasSuffix(host, ".local") {
+		return true
+	}
+
+	ip := net.ParseIP(host)
+	if ip != nil {
+		return ip.IsPrivate() || ip.IsLoopback()
+	}
+
+	return false
 }
