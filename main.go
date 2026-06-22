@@ -3,51 +3,45 @@ package main
 import (
 	"errors"
 	"fmt"
-	"log"
 	"os"
 	"time"
 )
 
 const defaultAppID = "1517892834907394229"
 
-func init() {
-	log.SetFlags(0)
-	log.SetOutput(os.Stdout)
-}
-
 func main() {
-	log.Println("starting jellyfin rpc daemon")
+	Info("starting jellyfin rpc daemon")
 
 	configDir, err := os.UserConfigDir()
 	if err != nil {
-		log.Fatalf("error finding config dir: %v\n", err)
+		Fatal("error finding config dir: %v", err)
 		return
 	}
 
 	cfgPath := configDir + "/jellyrpc/config"
 	cfg, err := LoadConfig(cfgPath)
 	if errors.Is(err, os.ErrNotExist) {
-		log.Fatalln("couldn't find config file, does it exist?")
+		Fatal("couldn't find config file, does it exist?")
 	} else if err != nil {
-		log.Fatalf("error loading config file: %v\n", err)
+		Fatal("error loading config file: %v", err)
 		return
 	}
 
 	// check if required config options have values
 	// TODO use another jellyfin endpoint to verify values before polling?
 	if cfg.JellyfinKey == "" || cfg.JellyfinURL == "" || cfg.JellyfinUser == "" {
-		log.Fatalln("config file missing required values")
+		Fatal("config file missing required values")
 	} else {
-		log.Println("loaded config file")
+		Info("loaded config file")
 	}
 
 	if cfg.PollRate <= 0 {
-		log.Println("no poll rate set, using default (5s)")
+		Info("no poll rate, set using default (5s)")
 		cfg.PollRate = 5
 	}
 
 	if cfg.AppID != "" {
-		log.Printf("using custom discord app id: %s\n", cfg.AppID)
+		Info("using custom discord app id: %s", cfg.AppID)
 	} else {
 		cfg.AppID = defaultAppID
 	}
@@ -62,11 +56,11 @@ func main() {
 		sess, err := getJellyfinSessions(cfg)
 		if err != nil || !isSessionActive(sess) {
 			if err != nil {
-				log.Fatalf("jellyfin api err: %v\n", err)
+				Fatal("jellyfin api err: %v", err)
 			}
 
 			if dc != nil {
-				log.Println("no active jellyfin sessions, closing ipc socket")
+				Info("no active jellyfin sessions, closing ipc socket")
 				dc.Close()
 				dc = nil
 			}
@@ -74,10 +68,10 @@ func main() {
 		}
 
 		if dc == nil {
-			log.Println("active jellyfin session detected, opening ipc socket")
+			Info("active jellyfin session detected, opening ipc socket")
 			dc, err = NewDiscordConn(cfg.AppID)
 			if err != nil {
-				log.Fatalf("failed to connect: %v\n", err)
+				Fatal("failed to connect: %v", err)
 				dc = nil
 				continue
 			}
@@ -88,7 +82,7 @@ func main() {
 		// only logging when id changes, keeps shit tidy
 		if lastWatching != sess.NowPlayingItem.Id {
 			lastWatching = sess.NowPlayingItem.Id
-			log.Printf("active playing: %s, id: %s\n", sess.NowPlayingItem.Name, sess.NowPlayingItem.Id)
+			Info("active playing: %s, id: %s", sess.NowPlayingItem.Name, sess.NowPlayingItem.Id)
 		}
 
 		// if current session is an episode and therefore a series
@@ -139,7 +133,7 @@ func main() {
 		if sess.PlayState.IsPaused {
 			err := dc.SetPaused(rpcTitle, artworkURL)
 			if err != nil {
-				log.Fatalf("failed to update discord status: %v\n", err)
+				Fatal("failed to update discord status: %v", err)
 			}
 		} else {
 			// to have a time bar in our rpc activity we need a start and end epoch
@@ -159,7 +153,7 @@ func main() {
 			// then we set our activity status using the current playing item + epochs we calculated
 			err = dc.SetWatching(rpcTitle, rpcState, artworkURL, startEpoch, endEpoch)
 			if err != nil {
-				log.Fatalf("failed to update discord status: %v\n", err)
+				Fatal("failed to update discord status: %v", err)
 			}
 		}
 	}

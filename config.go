@@ -2,7 +2,6 @@ package main
 
 import (
 	"bufio"
-	"log"
 	"os"
 	"strconv"
 	"strings"
@@ -54,7 +53,7 @@ func LoadConfig(path string) (*Config, error) {
 		case "POLL_RATE":
 			i, err := strconv.Atoi(val)
 			if err != nil {
-				log.Printf("failed to set poll rate from config: %v\n", err)
+				Warn("failed to set poll rate from config: %v\n", err)
 				continue
 			}
 			cfg.PollRate = i
