@@ -53,6 +53,7 @@ type Args struct {
 type Activity struct {
 	Type       int         `json:"type"`
 	Details    string      `json:"details"`
+	DetailsURL string      `json:"details_url,omitempty"`
 	State      string      `json:"state"`
 	Timestamps *Timestamps `json:"timestamps,omitempty"`
 	Assets     *Assets     `json:"assets,omitempty"`
@@ -156,7 +157,7 @@ func (dc *DiscordConn) send(opcode uint32, payload []byte) error {
 // that's where the cool byte level shit ends, now it's just boring rpc shit..
 // of which I haven't commented much because it's pretty simple to understand
 
-func (dc *DiscordConn) SetWatching(title, status, arturl string, startEpoch, endEpoch int64) error {
+func (dc *DiscordConn) SetWatching(title, status, titleURL, arturl string, startEpoch, endEpoch int64) error {
 	// if the title or status are emtpy just send an empty activity to clear
 	if title == "" && status == "" {
 		p := Payload{
@@ -174,10 +175,11 @@ func (dc *DiscordConn) SetWatching(title, status, arturl string, startEpoch, end
 		Args: Args{
 			PID: os.Getpid(),
 			Activity: Activity{
-				Type:     3,
-				Details:  title,
-				State:    status,
-				Instance: true,
+				Type:       3,
+				Details:    title,
+				DetailsURL: titleURL,
+				State:      status,
+				Instance:   true,
 				Assets: &Assets{
 					LargeImage: arturl,
 					LargeText:  "jellyrpc",
@@ -204,17 +206,18 @@ func (dc *DiscordConn) SetWatching(title, status, arturl string, startEpoch, end
 // simeple func to set a "paused" state
 // attempted to try send an empty SET_ACTIVITY but that doesn't
 // clear the rpc activity, instead fallsback to something adhoc
-func (dc *DiscordConn) SetPaused(title, arturl string) error {
+func (dc *DiscordConn) SetPaused(title, titleURL, arturl string) error {
 	p := Payload{
 		Cmd:   "SET_ACTIVITY",
 		Nonce: "1",
 		Args: Args{
 			PID: os.Getpid(),
 			Activity: Activity{
-				Type:     3,
-				Details:  title,
-				State:    "Paused",
-				Instance: true,
+				Type:       3,
+				Details:    title,
+				DetailsURL: titleURL,
+				State:      "Paused",
+				Instance:   true,
 				Assets: &Assets{
 					LargeImage: arturl,
 					LargeText:  fmt.Sprintf("jellyrpc [%s]", gitHash),

@@ -82,7 +82,7 @@ func main() {
 			}
 		}
 
-		var rpcTitle, targetImageID, rpcState, artworkURL string
+		var rpcTitle, targetImageID, rpcState, artworkURL, rpcTitleURL string
 
 		// only logging when id changes, keeps shit tidy
 		if lastWatching != sess.NowPlayingItem.Id {
@@ -135,8 +135,21 @@ func main() {
 			)
 		}
 
+		if cfg.useDBLink {
+			if sess.NowPlayingItem.ProviderIds.Imdb != "" {
+				rpcTitleURL = fmt.Sprintf("https://www.imdb.com/title/%s", sess.NowPlayingItem.ProviderIds.Imdb)
+			} else if sess.NowPlayingItem.ProviderIds.Tvdb != "" {
+				// was kinda lazy and couldn't find a way to link straight to tvdb page from id
+				// fuck tvdb anyway shits ass
+				// TODO helper func to resolve direct tvdb link from id
+				rpcTitleURL = fmt.Sprintf("https://thetvdb.com/search?query=%s", sess.NowPlayingItem.ProviderIds.Tvdb)
+			} else {
+				Warn("unable to find db link for media")
+			}
+		}
+
 		if sess.PlayState.IsPaused {
-			err := dc.SetPaused(rpcTitle, artworkURL)
+			err := dc.SetPaused(rpcTitle, rpcTitleURL, artworkURL)
 			if err != nil {
 				Fatal("failed to update discord status: %v", err)
 			}
@@ -156,7 +169,7 @@ func main() {
 			endEpoch := now + (remainingSec * 1000)
 
 			// then we set our activity status using the current playing item + epochs we calculated
-			err = dc.SetWatching(rpcTitle, rpcState, artworkURL, startEpoch, endEpoch)
+			err = dc.SetWatching(rpcTitle, rpcState, rpcTitleURL, artworkURL, startEpoch, endEpoch)
 			if err != nil {
 				Fatal("failed to update discord status: %v", err)
 			}

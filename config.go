@@ -16,6 +16,7 @@ type Config struct {
 	JellyfinUser string
 	PollRate     int
 	AppID        string
+	useDBLink    bool
 }
 
 func LoadConfig(path string) (*Config, error) {
@@ -59,6 +60,12 @@ func LoadConfig(path string) (*Config, error) {
 			cfg.PollRate = i
 		case "APP_ID":
 			cfg.AppID = val
+		case "DB_LINK":
+			if val == "true" {
+				cfg.useDBLink = true
+			} else {
+				cfg.useDBLink = false
+			}
 		}
 	}
 

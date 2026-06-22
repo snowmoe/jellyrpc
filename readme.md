@@ -54,6 +54,7 @@ if you have any problems run `journalctl --user -u jellyrpc -n 30` and/or make a
 
 - `POLL_RATE` can be set to an integer(>0) to set how often the daemon will poll in seconds
 - `APP_ID` can be set to override the default discord application id with your own
+- `DB_LINK` can be set to `true` to enable a link on the rpc activity to imdb/tvdb
 
 #### manual install
 

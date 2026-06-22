@@ -6,3 +6,4 @@ JELLYFIN_USER=
 # optional values, uncomment to use, see readme for more info
 # POLL_RATE=
 # APP_ID=
+# DB_LINK=
