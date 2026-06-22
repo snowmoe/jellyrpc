@@ -10,11 +10,6 @@ import (
 	"path/filepath"
 )
 
-// the original (commit 156f064) code an llm just spewed this out, but I was lowkey pissed I
-// didn't understand it so went through along side docs and annotated
-// EVERYTHING, hence the fuck ton of comments everywhere
-// but hey, I understand it now and it's actually quite interesting, worth reading through
-
 // https://docs.discord.com/developers/topics/rpc#rpc-over-ipc
 
 // header consisting of 4+4 bytes
