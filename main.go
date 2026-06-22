@@ -49,6 +49,10 @@ func main() {
 		cfg.AppID = defaultAppID
 	}
 
+	if cfg.useEpisodeArt {
+		Info("preferring episode art instead of series")
+	}
+
 	ticker := time.NewTicker(time.Duration(cfg.PollRate) * time.Second)
 	defer ticker.Stop()
 
