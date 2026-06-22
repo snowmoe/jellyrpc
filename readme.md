@@ -53,6 +53,7 @@ if you have any problems run `journalctl --user -u jellyrpc -n 30` and/or make a
 #### optional settings
 
 - `POLL_RATE` can be set to an integer(>0) to set how often the daemon will poll in seconds
+- `APP_ID` can be set to override the default discord application id with your own
 
 #### manual install
 

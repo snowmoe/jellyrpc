@@ -16,6 +16,7 @@ type Config struct {
 	JellyfinKey  string
 	JellyfinUser string
 	PollRate     int
+	AppID        string
 }
 
 func LoadConfig(path string) (*Config, error) {
@@ -57,6 +58,8 @@ func LoadConfig(path string) (*Config, error) {
 				continue
 			}
 			cfg.PollRate = i
+		case "APP_ID":
+			cfg.AppID = val
 		}
 	}
 

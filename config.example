@@ -3,5 +3,6 @@ JELLYFIN_URL=
 JELLYFIN_KEY=
 JELLYFIN_USER=
 
-# optional values, uncomment to use
-# POLL_RATE=3
+# optional values, uncomment to use, see readme for more info
+# POLL_RATE=
+# APP_ID=

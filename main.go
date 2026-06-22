@@ -1,14 +1,14 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"log"
 	"os"
 	"time"
 )
 
-// TODO add optional config opt to override the app id
-const applicationID = "1517892834907394229"
+const defaultAppID = "1517892834907394229"
 
 func init() {
 	log.SetFlags(0)
@@ -26,7 +26,9 @@ func main() {
 
 	cfgPath := configDir + "/jellyrpc/config"
 	cfg, err := LoadConfig(cfgPath)
-	if err != nil {
+	if errors.Is(err, os.ErrNotExist) {
+		log.Fatalln("couldn't find config file, does it exist?")
+	} else if err != nil {
 		log.Fatalf("error loading config file: %v\n", err)
 		return
 	}
@@ -42,6 +44,12 @@ func main() {
 	if cfg.PollRate <= 0 {
 		log.Println("no poll rate set, using default (5s)")
 		cfg.PollRate = 5
+	}
+
+	if cfg.AppID != "" {
+		log.Printf("using custom discord app id: %s\n", cfg.AppID)
+	} else {
+		cfg.AppID = defaultAppID
 	}
 
 	ticker := time.NewTicker(time.Duration(cfg.PollRate) * time.Second)
@@ -67,7 +75,7 @@ func main() {
 
 		if dc == nil {
 			log.Println("active jellyfin session detected, opening ipc socket")
-			dc, err = NewDiscordConn(applicationID)
+			dc, err = NewDiscordConn(cfg.AppID)
 			if err != nil {
 				log.Fatalf("failed to connect: %v\n", err)
 				dc = nil
