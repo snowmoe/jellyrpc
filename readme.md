@@ -50,6 +50,39 @@ now you can run `systemctl --user enable --now jellyrpc` to start the daemon
 
 if you have any problems run `journalctl --user -u jellyrpc -n 30` and/or make an issue
 
+#### using user token instead of api key
+<details>
+  <summary>
+expand me
+  </summary>
+
+if you don't have access to api keys on your jellyfin instance (e.g. using a friends instance) you can still use your user token for rpc
+
+you can fetch this manually by grabbing the token from the `Authorization` header in a request and looking at the `Token=""` value
+
+alternatively you can use the below js snippet by pressing F12 and pasting it in the console:
+
+```js
+(function() {
+    const originalFetch = window.fetch;
+    window.fetch = async function(...args) {
+        const headers = args[1]?.headers || {};
+        const token = headers['X-MediaBrowser-Token'] || headers['Authorization'] || headers['X-Emby-Token'];
+        
+        if (token) {
+            console.log("Found Jellyfin Token:", token.includes('Token=') ? token.split('Token="')[1].split('"')[0] : token);
+            window.fetch = originalFetch;
+        }
+        return originalFetch.apply(this, args);
+    };
+    console.log("click literally anything and it should output ur token");
+})();
+```
+
+you can then just use this token as value for the `JELLYFIN_KEY` option in config
+    
+</details>
+
 #### optional settings
 
 - `POLL_RATE` can be set to an integer(>0) to set how often the daemon will poll in seconds
