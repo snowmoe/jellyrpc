@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"net"
 	"net/http"
 	"net/url"
@@ -42,7 +43,8 @@ type ProviderIds struct {
 // making sure we only get the session for the specified user
 func getJellyfinSessions(cfg *Config) (*Session, error) {
 	req, _ := http.NewRequest("GET", cfg.JellyfinURL+"/Sessions", nil)
-	req.Header.Set("X-MediaBrowser-Token", cfg.JellyfinKey)
+	authScheme := fmt.Sprintf("MediaBrowser Token=%s", cfg.JellyfinKey)
+	req.Header.Set("Authorization", authScheme)
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
