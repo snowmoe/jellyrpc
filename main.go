@@ -10,6 +10,8 @@ import (
 
 const defaultAppID = "1517892834907394229"
 
+var gitHash = "dev"
+
 func main() {
 	Info("starting jellyfin rpc daemon")
 

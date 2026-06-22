@@ -217,7 +217,7 @@ func (dc *DiscordConn) SetPaused(title, arturl string) error {
 				Instance: true,
 				Assets: &Assets{
 					LargeImage: arturl,
-					LargeText:  "jellyrpc",
+					LargeText:  fmt.Sprintf("jellyrpc [%s]", gitHash),
 				},
 			},
 		},
