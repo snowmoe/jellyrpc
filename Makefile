@@ -6,7 +6,7 @@ SYSTEMD_DIR=$(HOME)/.config/systemd/user
 
 build:
 	@echo "compiling binary"
-	go build -ldflags="-s -w -X main.gitHash=$(git rev-parse --short HEAD)" -o $(BINARY_NAME) .
+	go build -ldflags="-s -w -X main.gitHash=$$(git rev-parse --short HEAD)" -o $(BINARY_NAME) .
 
 install: build
 	@echo "creating deployment dirs"
@@ -14,7 +14,7 @@ install: build
 	mkdir -p $(SYSTEMD_DIR)
 
 	@echo "installing binary to $(BUILD_DIR)"
-	cp $(BINARY_NAME) $(BUILD_DIR)/$(BINARY_NAME)
+	install -Dm755 $(BINARY_NAME) $(BUILD_DIR)/$(BINARY_NAME)
 
 	@echo "installing systemd user service"
 	cp $(BINARY_NAME).service $(SYSTEMD_DIR)/$(BINARY_NAME).service
@@ -27,6 +27,7 @@ install: build
 	systemctl --user daemon-reload
 
 	@echo "setup complete, run 'systemctl --user enable --now $(BINARY_NAME)' to start."
+	@echo "or 'systemctl --user restart $(BINARY_NAME)' to update the daemon."
 
 uninstall:
 	@echo "stopping and disabling services"
