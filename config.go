@@ -11,12 +11,13 @@ import (
 // since I wanted no deps I just split key and val with =, trim spaces, and pray
 
 type Config struct {
-	JellyfinURL  string
-	JellyfinKey  string
-	JellyfinUser string
-	PollRate     int
-	AppID        string
-	useDBLink    bool
+	JellyfinURL   string
+	JellyfinKey   string
+	JellyfinUser  string
+	PollRate      int
+	AppID         string
+	useDBLink     bool
+	useEpisodeArt bool
 }
 
 func LoadConfig(path string) (*Config, error) {
@@ -65,6 +66,12 @@ func LoadConfig(path string) (*Config, error) {
 				cfg.useDBLink = true
 			} else {
 				cfg.useDBLink = false
+			}
+		case "USE_EPISODE_ART":
+			if val == "true" {
+				cfg.useEpisodeArt = true
+			} else {
+				cfg.useEpisodeArt = false
 			}
 		}
 	}

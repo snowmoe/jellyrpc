@@ -100,11 +100,12 @@ func main() {
 				sess.NowPlayingItem.Name,
 			)
 
-			// prefer series' main cover art, and fallback to per ep art
-			if sess.NowPlayingItem.SeriesId != "" {
-				targetImageID = sess.NowPlayingItem.SeriesId
-			} else {
+			// if use episode cover if use ep art is true or if no series id was found
+			if cfg.useEpisodeArt || sess.NowPlayingItem.SeriesId == "" {
 				targetImageID = sess.NowPlayingItem.Id
+			} else {
+				// otherwise fallback to using series art
+				targetImageID = sess.NowPlayingItem.SeriesId
 			}
 		} else {
 			// else = movie (probably) so no state
