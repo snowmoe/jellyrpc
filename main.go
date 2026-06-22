@@ -3,11 +3,14 @@ package main
 import (
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"time"
 )
 
 const defaultAppID = "1517892834907394229"
+
+var gitHash = "dev"
 
 func main() {
 	Info("starting jellyfin rpc daemon")
@@ -55,7 +58,9 @@ func main() {
 	for range ticker.C {
 		sess, err := getJellyfinSessions(cfg)
 		if err != nil || !isSessionActive(sess) {
-			if err != nil {
+			if err != nil && errors.Is(err, io.EOF) {
+				Fatal("jellyfin api returned EOF: probably unauthorized api key or invalid instance url")
+			} else if err != nil {
 				Fatal("jellyfin api err: %v", err)
 			}
 
