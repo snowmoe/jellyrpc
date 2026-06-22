@@ -21,7 +21,7 @@ install: build
 
 	@echo "setting up config"
 	mkdir -p $(HOME)/.config/jellyrpc
-	cp -n config.example $(HOME)/.config/jellyrpc/config
+	cp --update=none config.example $(HOME)/.config/jellyrpc/config
 
 	@echo "reloading systemd user daemon"
 	systemctl --user daemon-reload
