@@ -1,3 +1,4 @@
 - music support
 - nix flake + home manager module
 - textless cover art option
+- handle jellyfin instance being offline w/ retries
