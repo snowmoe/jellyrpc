@@ -125,7 +125,10 @@ func main() {
 		bridgeApi := "https://rot.sh/poster"
 
 		if IsLocalInstance(cfg.JellyfinURL) {
-			if sess.NowPlayingItem.ProviderIds.Imdb != "" {
+			// did check and couldn't see if tmdb has per episode id's, so this might just be redundant but oh well
+			if sess.NowPlayingItem.ProviderIds.Tmdb != "" {
+				artworkURL = fmt.Sprintf("%s?tmdb=%s", bridgeApi, sess.NowPlayingItem.ProviderIds.Tmdb)
+			} else if sess.NowPlayingItem.ProviderIds.Imdb != "" {
 				artworkURL = fmt.Sprintf("%s?imdb=%s", bridgeApi, sess.NowPlayingItem.ProviderIds.Imdb)
 			} else if sess.NowPlayingItem.ProviderIds.Tvdb != "" {
 				artworkURL = fmt.Sprintf("%s?tvdb=%s", bridgeApi, sess.NowPlayingItem.ProviderIds.Tvdb)
