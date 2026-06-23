@@ -20,7 +20,7 @@ features:
 
 ### install
 
-> requires `go` and `make`
+> requires `git`, `go` and `make`
 
 ```bash
 git clone https://github.com/reckedpr/jellyrpc
@@ -68,9 +68,9 @@ alternatively you can use the below js snippet by pressing F12 and pasting it in
     window.fetch = async function(...args) {
         const headers = args[1]?.headers || {};
         const token = headers['X-MediaBrowser-Token'] || headers['Authorization'] || headers['X-Emby-Token'];
-        
+
         if (token) {
-            console.log("Found Jellyfin Token:", token.includes('Token=') ? token.split('Token="')[1].split('"')[0] : token);
+            console.log("jellyfin token:", token.includes('Token=') ? token.split('Token="')[1].split('"')[0] : token);
             window.fetch = originalFetch;
         }
         return originalFetch.apply(this, args);
@@ -80,7 +80,7 @@ alternatively you can use the below js snippet by pressing F12 and pasting it in
 ```
 
 you can then just use this token as value for the `JELLYFIN_KEY` option in config
-    
+
 </details>
 
 #### optional settings
@@ -100,6 +100,9 @@ git clone https://github.com/reckedpr/jellyrpc
 cd jellyrpc
 
 go build -ldflags="-s -w"
+
+# OR optionally build with the git commit hash embedded
+go build -ldflags="-s -w main.gitHash=$(git rev-parse --short HEAD)"
 
 # copy the example config
 mkdir -p ~/.config/jellyrpc

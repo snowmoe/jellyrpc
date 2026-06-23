@@ -14,6 +14,11 @@ var gitHash = "dev"
 
 func main() {
 	Info("starting jellyfin rpc daemon")
+	if gitHash != "dev" {
+		Info("daemon running from commit: %s", gitHash)
+	} else {
+		Info("running dev build")
+	}
 
 	configDir, err := os.UserConfigDir()
 	if err != nil {
