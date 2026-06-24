@@ -47,7 +47,7 @@ func LoadConfig(path string) (*Config, error) {
 
 		switch key {
 		case "JELLYFIN_URL":
-			cfg.JellyfinURL = val
+			cfg.JellyfinURL = SanitiseURL(val)
 		case "JELLYFIN_KEY":
 			cfg.JellyfinKey = val
 		case "JELLYFIN_USER":
