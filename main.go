@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"time"
 )
 
@@ -26,7 +27,8 @@ func main() {
 		return
 	}
 
-	cfgPath := configDir + "/jellyrpc/config"
+	cfgPath := filepath.Join(configDir, "jellyrpc", "config")
+
 	cfg, err := LoadConfig(cfgPath)
 	if errors.Is(err, os.ErrNotExist) {
 		Fatal("couldn't find config file, does it exist?")
