@@ -177,7 +177,7 @@ func (dc *DiscordConn) SetWatching(title, status, titleURL, arturl string, start
 				Instance:   true,
 				Assets: &Assets{
 					LargeImage: arturl,
-					LargeText:  fmt.Sprintf("jellyrpc [%s]", gitHash),
+					LargeText:  fmt.Sprintf("jellyrpc %s", gitVersion),
 				},
 			},
 		},
@@ -215,7 +215,7 @@ func (dc *DiscordConn) SetPaused(title, titleURL, arturl string) error {
 				Instance:   true,
 				Assets: &Assets{
 					LargeImage: arturl,
-					LargeText:  fmt.Sprintf("jellyrpc [%s]", gitHash),
+					LargeText:  fmt.Sprintf("jellyrpc %s", gitVersion),
 				},
 			},
 		},

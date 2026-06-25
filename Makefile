@@ -6,7 +6,7 @@ SYSTEMD_DIR=$(HOME)/.config/systemd/user
 
 build:
 	@echo "compiling binary"
-	go build -ldflags="-s -w -X main.gitHash=$$(git rev-parse --short HEAD)" -o $(BINARY_NAME) .
+	go build -ldflags="-s -w -X main.gitVersion=$$(git describe --tags --abbrev=0)" -o $(BINARY_NAME) .
 
 install: build
 	@echo "creating deployment dirs"

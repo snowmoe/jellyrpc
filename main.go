@@ -11,12 +11,17 @@ import (
 
 const defaultAppID = "1517892834907394229"
 
-var gitHash = "dev"
+var (
+	gitHash    = "dev"
+	gitVersion = "dev"
+)
 
 func main() {
 	Info("starting jellyfin rpc daemon")
-	if gitHash != "dev" {
-		Info("daemon running from commit: %s", gitHash)
+	if gitVersion != "dev" {
+		Info("running jellyrpc %s", gitVersion)
+	} else if gitHash != "dev" {
+		Info("running jellyrpc from commit: %s", gitHash)
 	} else {
 		Info("running dev build")
 	}
