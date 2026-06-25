@@ -102,7 +102,7 @@ cd jellyrpc
 go build -ldflags="-s -w"
 
 # OR optionally build with the git commit hash embedded
-go build -ldflags="-s -w main.gitHash=$(git rev-parse --short HEAD)"
+go build -ldflags="-s -w -X main.gitHash=$(git rev-parse --short HEAD)"
 
 # copy the example config
 mkdir -p ~/.config/jellyrpc
