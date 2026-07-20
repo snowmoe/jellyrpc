@@ -1,12 +1,14 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net"
 	"net/http"
 	"net/url"
 	"strings"
+	"time"
 )
 
 // /Session endpoint json structure
@@ -38,19 +40,49 @@ type ProviderIds struct {
 	Tvdb string `json:"Tvdb"`
 }
 
-// very simple functon compared to the other ipc shit
-// just call the GET /Sessions endpoint and unmarshal into our structs
-// making sure we only get the session for the specified user
-func getJellyfinSessions(cfg *Config) (*Session, error) {
-	req, _ := http.NewRequest("GET", cfg.JellyfinURL+"/Sessions", nil)
-	authScheme := fmt.Sprintf("MediaBrowser Token=%s", cfg.JellyfinKey)
+type JellyfinClient struct {
+	BaseURL    string
+	APIKey     string
+	UserName   string
+	HTTPClient *http.Client
+}
+
+func NewJellyfinClient(cfg *Config) *JellyfinClient {
+	return &JellyfinClient{
+		BaseURL:    cfg.JellyfinURL,
+		APIKey:     cfg.JellyfinKey,
+		UserName:   cfg.JellyfinUser,
+		// timeout so a hung jellyfin connection cant block polling forever
+		HTTPClient: &http.Client{Timeout: 10 * time.Second},
+	}
+}
+
+func (c *JellyfinClient) GetActiveSession(ctx context.Context) (*Session, error) {
+	req, err := http.NewRequestWithContext(ctx, "GET", c.BaseURL+"/Sessions", nil)
+	if err != nil {
+		return nil, err
+	}
+
+	authScheme := fmt.Sprintf("MediaBrowser Token=%s", c.APIKey)
 	req.Header.Set("Authorization", authScheme)
 
-	resp, err := http.DefaultClient.Do(req)
+	client := c.HTTPClient
+	if client == nil {
+		client = http.DefaultClient
+	}
+
+	resp, err := client.Do(req)
 	if err != nil {
 		return nil, err
 	}
 	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		if resp.StatusCode == http.StatusUnauthorized {
+			return nil, fmt.Errorf("jellyfin returned 401, check your api key")
+		}
+		return nil, fmt.Errorf("jellyfin returned unexpected status: %s", resp.Status)
+	}
 
 	var sessions []Session
 	if err := json.NewDecoder(resp.Body).Decode(&sessions); err != nil {
@@ -58,7 +90,7 @@ func getJellyfinSessions(cfg *Config) (*Session, error) {
 	}
 
 	for _, s := range sessions {
-		if s.UserName == cfg.JellyfinUser && s.NowPlayingItem.Name != "" {
+		if s.UserName == c.UserName && s.NowPlayingItem.Name != "" {
 			return &s, nil
 		}
 	}

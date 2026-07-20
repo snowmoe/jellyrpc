@@ -1,9 +1,9 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"time"
@@ -60,15 +60,15 @@ func main() {
 	ticker := time.NewTicker(time.Duration(cfg.PollRate) * time.Second)
 	defer ticker.Stop()
 
+	jf := NewJellyfinClient(cfg)
+
 	var dc *DiscordConn
 	var lastWatching = ""
 
 	for range ticker.C {
-		sess, err := getJellyfinSessions(cfg)
+		sess, err := jf.GetActiveSession(context.Background())
 		if err != nil || !isSessionActive(sess) {
-			if err != nil && errors.Is(err, io.EOF) {
-				Fatal("jellyfin api returned EOF: probably unauthorized api key or invalid instance url")
-			} else if err != nil {
+			if err != nil {
 				Fatal("jellyfin api err: %v", err)
 			}
 
