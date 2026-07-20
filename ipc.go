@@ -86,11 +86,18 @@ func NewDiscordConn(clientID string) (*DiscordConn, error) {
 		runtimeDir = "/tmp"
 	}
 
-	// connect to the unix socket under the dir resolved before
-	// 0 for the first client found, didn't see in docs but I assume if multiple then we could use 1,2, etc.
-	socketPath := filepath.Join(runtimeDir, "discord-ipc-0")
-	conn, err := net.Dial("unix", socketPath)
-	if err != nil {
+	// discord exposes sockets as discord-ipc-0..9, extra clients (flatpak, a
+	// second install) land on higher numbers so try each and take the first
+	var conn net.Conn
+	var err error
+	for i := range 10 {
+		socketPath := filepath.Join(runtimeDir, fmt.Sprintf("discord-ipc-%d", i))
+		conn, err = net.Dial("unix", socketPath)
+		if err == nil {
+			break
+		}
+	}
+	if conn == nil {
 		return nil, fmt.Errorf("could not connect to discord ipc: %w", err)
 	}
 
