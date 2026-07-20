@@ -61,7 +61,7 @@ func main() {
 		cfg.AppID = defaultAppID
 	}
 
-	if cfg.useEpisodeArt {
+	if cfg.UseEpisodeArt {
 		Info("preferring episode art instead of series")
 	}
 
@@ -117,7 +117,7 @@ func main() {
 			)
 
 			// if use episode cover if use ep art is true or if no series id was found
-			if cfg.useEpisodeArt || sess.NowPlayingItem.SeriesId == "" {
+			if cfg.UseEpisodeArt || sess.NowPlayingItem.SeriesId == "" {
 				targetImageID = sess.NowPlayingItem.Id
 			} else {
 				// otherwise fallback to using series art
@@ -155,7 +155,7 @@ func main() {
 			)
 		}
 
-		if cfg.useDBLink {
+		if cfg.UseDBLink {
 			if sess.NowPlayingItem.ProviderIds.Imdb != "" {
 				rpcTitleURL = fmt.Sprintf("https://www.imdb.com/title/%s", sess.NowPlayingItem.ProviderIds.Imdb)
 			} else if sess.NowPlayingItem.ProviderIds.Tvdb != "" {

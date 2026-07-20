@@ -16,8 +16,17 @@ type Config struct {
 	JellyfinUser  string
 	PollRate      int
 	AppID         string
-	useDBLink     bool
-	useEpisodeArt bool
+	UseDBLink     bool
+	UseEpisodeArt bool
+}
+
+// accepts the usual truthy spellings so a config isnt silently false on "1" or "yes"
+func parseBool(val string) bool {
+	switch strings.ToLower(val) {
+	case "true", "1", "yes", "on":
+		return true
+	}
+	return false
 }
 
 func LoadConfig(path string) (*Config, error) {
@@ -62,17 +71,11 @@ func LoadConfig(path string) (*Config, error) {
 		case "APP_ID":
 			cfg.AppID = val
 		case "DB_LINK":
-			if val == "true" {
-				cfg.useDBLink = true
-			} else {
-				cfg.useDBLink = false
-			}
+			cfg.UseDBLink = parseBool(val)
 		case "USE_EPISODE_ART":
-			if val == "true" {
-				cfg.useEpisodeArt = true
-			} else {
-				cfg.useEpisodeArt = false
-			}
+			cfg.UseEpisodeArt = parseBool(val)
+		default:
+			Warn("unknown config key: %s", key)
 		}
 	}
 
