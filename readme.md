@@ -9,6 +9,8 @@ a simple jellyfin discord rpc daemon written in golang
 
 supports local and public jellyfin instances, and doesn't require any extra api keys for cover art support on local instances
 
+> local cover art is resolved by a lightweight bridge (rot.sh) from the media id only, it logs nothing and only discord ever fetches the image
+
 ```md
 features:
   - lightweight
