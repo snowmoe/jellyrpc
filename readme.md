@@ -16,6 +16,7 @@ features:
   - lightweight
   - cover art fetching
   - pause state handling
+  - idle pause timeout
   - efficient socket mgmt
   - systemd user service
 ```
@@ -88,6 +89,7 @@ you can then just use this token as value for the `JELLYFIN_KEY` option in confi
 #### optional settings
 
 - `POLL_RATE` can be set to an integer(>0) to set how often the daemon will poll in seconds
+- `PAUSE_TIMEOUT` can be set to an integer of minutes to drop the presence after being paused that long (defaults to 10, set `0` to disable)
 - `APP_ID` can be set to override the default discord application id with your own
 - `DB_LINK` can be set to `true` to enable a link on the rpc activity to imdb/tvdb
 - `USE_EPISODE_ART` can be set to `true` to prefer using episode specific cover art

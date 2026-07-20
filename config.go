@@ -16,6 +16,7 @@ type Config struct {
 	JellyfinKey   string
 	JellyfinUser  string
 	PollRate      int
+	PauseTimeout  int
 	AppID         string
 	UseDBLink     bool
 	UseEpisodeArt bool
@@ -33,6 +34,11 @@ func parseBool(val string) bool {
 func (cfg *Config) ApplyDefaults(defaultAppID string) {
 	if cfg.PollRate <= 0 {
 		cfg.PollRate = 5
+	}
+	// minutes paused before we drop the presence, unset (-1) gets a default,
+	// an explicit 0 disables the timeout
+	if cfg.PauseTimeout < 0 {
+		cfg.PauseTimeout = 10
 	}
 	if cfg.AppID == "" {
 		cfg.AppID = defaultAppID
@@ -53,7 +59,9 @@ func LoadConfig(path string) (*Config, error) {
 	}
 	defer file.Close()
 
-	cfg := &Config{}
+	// -1 marks pause timeout as unset so ApplyDefaults can tell it apart from
+	// an explicit 0 which disables the timeout
+	cfg := &Config{PauseTimeout: -1}
 	scanner := bufio.NewScanner(file)
 
 	for scanner.Scan() {
@@ -85,6 +93,13 @@ func LoadConfig(path string) (*Config, error) {
 				continue
 			}
 			cfg.PollRate = i
+		case "PAUSE_TIMEOUT":
+			i, err := strconv.Atoi(val)
+			if err != nil {
+				Warn("failed to set pause timeout from config: %v\n", err)
+				continue
+			}
+			cfg.PauseTimeout = i
 		case "APP_ID":
 			cfg.AppID = val
 		case "DB_LINK":

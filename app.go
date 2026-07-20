@@ -37,6 +37,7 @@ type App struct {
 	NewTicker   func(time.Duration) Ticker
 	Now         func() time.Time
 	lastPlaying string
+	pausedSince time.Time
 	sessionDown bool // whether the last jellyfin fetch failed, gates repeat warns
 	discordDown bool // whether the last discord connect failed, gates repeat warns
 }
@@ -95,11 +96,36 @@ func (a *App) poll(ctx context.Context, dc *PresenceClient, now func() time.Time
 	}
 
 	if !isSessionActive(sess) {
+		a.pausedSince = time.Time{}
 		if *dc != nil {
 			Info("no active jellyfin sessions, closing ipc socket")
 			a.reset(dc)
 		}
 		return
+	}
+
+	// a new item restarts the pause window so a freshly opened but paused
+	// item still gets shown and its own idle timeout
+	if sess.NowPlayingItem.Id != a.lastPlaying {
+		a.pausedSince = time.Time{}
+	}
+
+	// idle timeout, once paused past the configured window drop the socket and
+	// stop pushing until playback resumes or the item changes
+	if sess.PlayState.IsPaused {
+		if a.pausedSince.IsZero() {
+			a.pausedSince = now()
+		}
+		timeout := time.Duration(a.Config.PauseTimeout) * time.Minute
+		if timeout > 0 && now().Sub(a.pausedSince) >= timeout {
+			if *dc != nil {
+				Info("paused for %d min, closing ipc socket", a.Config.PauseTimeout)
+				a.reset(dc)
+			}
+			return
+		}
+	} else {
+		a.pausedSince = time.Time{}
 	}
 
 	if *dc == nil {

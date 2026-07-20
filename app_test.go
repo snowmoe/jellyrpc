@@ -105,3 +105,47 @@ func TestAppRunUpdatesPresenceAndClosesOnCancel(t *testing.T) {
 		t.Fatal("client was not closed")
 	}
 }
+
+func TestPollPauseTimeoutClosesSocket(t *testing.T) {
+	client := &fakePresenceClient{}
+	current := time.UnixMilli(0)
+	now := func() time.Time { return current }
+
+	sess := &Session{
+		NowPlayingItem: NowPlayingItem{Name: "Movie", Id: "movie-id", Type: "Movie"},
+	}
+	sess.PlayState.IsPaused = true
+
+	app := &App{
+		Config: &Config{
+			JellyfinURL:  "https://jelly.example.com",
+			AppID:        "app-id",
+			PauseTimeout: 1,
+		},
+		Sessions: &fakeSessions{sess: sess},
+		Connect: func(string) (PresenceClient, error) {
+			return client, nil
+		},
+	}
+
+	var dc PresenceClient
+
+	// first poll while paused opens the socket and pushes once
+	app.poll(context.Background(), &dc, now)
+	if dc == nil || client.pausedCalls != 1 {
+		t.Fatalf("expected open socket and one paused push, got dc=%v pausedCalls=%d", dc != nil, client.pausedCalls)
+	}
+
+	// advance past the timeout, next poll should drop the socket and stop pushing
+	current = current.Add(2 * time.Minute)
+	app.poll(context.Background(), &dc, now)
+	if dc != nil {
+		t.Fatal("socket was not closed after pause timeout")
+	}
+	if !client.closed {
+		t.Fatal("client was not closed after pause timeout")
+	}
+	if client.pausedCalls != 1 {
+		t.Fatalf("pausedCalls = %d, want 1 (no push after timeout)", client.pausedCalls)
+	}
+}
