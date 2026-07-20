@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"errors"
 	"os"
 	"strconv"
 	"strings"
@@ -27,6 +28,22 @@ func parseBool(val string) bool {
 		return true
 	}
 	return false
+}
+
+func (cfg *Config) ApplyDefaults(defaultAppID string) {
+	if cfg.PollRate <= 0 {
+		cfg.PollRate = 5
+	}
+	if cfg.AppID == "" {
+		cfg.AppID = defaultAppID
+	}
+}
+
+func (cfg *Config) Validate() error {
+	if cfg.JellyfinKey == "" || cfg.JellyfinURL == "" || cfg.JellyfinUser == "" {
+		return errors.New("config file missing required values")
+	}
+	return nil
 }
 
 func LoadConfig(path string) (*Config, error) {

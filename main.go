@@ -42,23 +42,15 @@ func main() {
 		return
 	}
 
-	// check if required config options have values
-	// TODO use another jellyfin endpoint to verify values before polling?
-	if cfg.JellyfinKey == "" || cfg.JellyfinURL == "" || cfg.JellyfinUser == "" {
-		Fatal("config file missing required values")
-	} else {
-		Info("loaded config file")
-	}
+	cfg.ApplyDefaults(defaultAppID)
 
-	if cfg.PollRate <= 0 {
-		Info("no poll rate, set using default (5s)")
-		cfg.PollRate = 5
+	if err := cfg.Validate(); err != nil {
+		Fatal("%v", err)
 	}
+	Info("loaded config file")
 
-	if cfg.AppID != "" {
+	if cfg.AppID != defaultAppID {
 		Info("using custom discord app id: %s", cfg.AppID)
-	} else {
-		cfg.AppID = defaultAppID
 	}
 
 	if cfg.UseEpisodeArt {
