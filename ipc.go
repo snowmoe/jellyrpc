@@ -5,9 +5,11 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"path/filepath"
+	"time"
 )
 
 // https://docs.discord.com/developers/topics/rpc#rpc-over-ipc
@@ -105,29 +107,42 @@ func NewDiscordConn(clientID string) (*DiscordConn, error) {
 		return nil, err
 	}
 
-	// create an 8 byte header to read our response into
-	header := make([]byte, 8)
-
-	// .. read the response into it
-	if _, err := conn.Read(header); err != nil {
+	// read the handshake reply, opcode 2 is a close frame so discord rejected us
+	opcode, _, err := dc.readFrame()
+	if err != nil {
 		conn.Close()
 		return nil, err
 	}
-
-	// the first 4 bytes of the header is the opcode response
-	// the last 4 bytes are the legnth of the body
-	// this lets us determine how large the message is, which is crucial since
-	// it's just pure bytes, so there is no message "borders"
-	length := binary.LittleEndian.Uint32(header[4:8])
-
-	// create a body with size of X bytes read from header
-	body := make([]byte, length)
-
-	// read from the conn into that body
-	conn.Read(body)
+	if opcode == 2 {
+		conn.Close()
+		return nil, fmt.Errorf("discord rejected handshake, check your app id")
+	}
 
 	// return our dc struct to be used in main.go for calling the other funcs
 	return dc, nil
+}
+
+// reads a single frame off the socket, the 8 byte header gives us the opcode
+// and body length so we know exactly how many bytes to pull, ReadFull handles
+// the body arriving across multiple packets
+func (dc *DiscordConn) readFrame() (uint32, []byte, error) {
+	// deadline so a silent discord cant wedge us in a blocking read
+	dc.conn.SetReadDeadline(time.Now().Add(5 * time.Second))
+
+	header := make([]byte, 8)
+	if _, err := io.ReadFull(dc.conn, header); err != nil {
+		return 0, nil, err
+	}
+
+	opcode := binary.LittleEndian.Uint32(header[0:4])
+	length := binary.LittleEndian.Uint32(header[4:8])
+
+	body := make([]byte, length)
+	if _, err := io.ReadFull(dc.conn, body); err != nil {
+		return 0, nil, err
+	}
+
+	return opcode, body, nil
 }
 
 // takes an opcode (uint32 so 4 bytes) and a payload and
