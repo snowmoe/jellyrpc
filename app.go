@@ -37,6 +37,8 @@ type App struct {
 	NewTicker   func(time.Duration) Ticker
 	Now         func() time.Time
 	lastPlaying string
+	sessionDown bool // whether the last jellyfin fetch failed, gates repeat warns
+	discordDown bool // whether the last discord connect failed, gates repeat warns
 }
 
 func (a *App) Run(ctx context.Context) error {
@@ -79,9 +81,17 @@ func (a *App) Run(ctx context.Context) error {
 func (a *App) poll(ctx context.Context, dc *PresenceClient, now func() time.Time) {
 	sess, err := a.Sessions.GetActiveSession(ctx)
 	if err != nil {
-		Warn("failed to fetch jellyfin session: %v", err)
+		// warn once on the way down, stay quiet until it recovers
+		if !a.sessionDown {
+			Warn("failed to fetch jellyfin session: %v", err)
+			a.sessionDown = true
+		}
 		a.reset(dc)
 		return
+	}
+	if a.sessionDown {
+		Info("jellyfin session fetch recovered")
+		a.sessionDown = false
 	}
 
 	if !isSessionActive(sess) {
@@ -96,9 +106,13 @@ func (a *App) poll(ctx context.Context, dc *PresenceClient, now func() time.Time
 		Info("active jellyfin session detected, opening ipc socket")
 		conn, err := a.Connect(a.Config.AppID)
 		if err != nil {
-			Warn("failed to connect to discord: %v", err)
+			if !a.discordDown {
+				Warn("failed to connect to discord: %v", err)
+				a.discordDown = true
+			}
 			return
 		}
+		a.discordDown = false
 		*dc = conn
 	}
 
