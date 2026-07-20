@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"errors"
-	"fmt"
 	"os"
 	"path/filepath"
 	"time"
@@ -90,101 +89,28 @@ func main() {
 			}
 		}
 
-		var rpcTitle, targetImageID, rpcState, artworkURL, rpcTitleURL string
-
 		// only logging when id changes, keeps shit tidy
 		if lastWatching != sess.NowPlayingItem.Id {
 			lastWatching = sess.NowPlayingItem.Id
 			Info("active playing: %s, id: %s", sess.NowPlayingItem.Name, sess.NowPlayingItem.Id)
 		}
 
-		// if current session is an episode and therefore a series
-		// we use the series name as the title, and state as season, ep and ep name
-		if sess.NowPlayingItem.Type == "Episode" {
-			rpcTitle = sess.NowPlayingItem.SeriesName
-			rpcState = fmt.Sprintf("S%02d:E%02d - %s",
-				sess.NowPlayingItem.ParentIndexNumber,
-				sess.NowPlayingItem.IndexNumber,
-				sess.NowPlayingItem.Name,
-			)
+		presence := BuildPresence(cfg, sess, time.Now().UnixMilli())
 
-			// if use episode cover if use ep art is true or if no series id was found
-			if cfg.UseEpisodeArt || sess.NowPlayingItem.SeriesId == "" {
-				targetImageID = sess.NowPlayingItem.Id
-			} else {
-				// otherwise fallback to using series art
-				targetImageID = sess.NowPlayingItem.SeriesId
-			}
+		if presence.Paused {
+			err = dc.SetPaused(presence.Title, presence.TitleURL, presence.ArtworkURL)
 		} else {
-			// else = movie (probably) so no state
-			rpcTitle = sess.NowPlayingItem.Name
-			rpcState = ""
-			targetImageID = sess.NowPlayingItem.Id
-		}
-
-		// api "bridge" that lets me use an imdb or tvdb id
-		// fetches the imdb image link and 302's to that, with caching !!
-		// should let people with non pub instances still have rpc cover art
-		// without any need for them to provide api key + keeping mine secret hehehe
-		bridgeApi := "https://rot.sh/poster"
-
-		if IsLocalInstance(cfg.JellyfinURL) {
-			// did check and couldn't see if tmdb has per episode id's, so this might just be redundant but oh well
-			if sess.NowPlayingItem.ProviderIds.Tmdb != "" {
-				artworkURL = fmt.Sprintf("%s?tmdb=%s", bridgeApi, sess.NowPlayingItem.ProviderIds.Tmdb)
-			} else if sess.NowPlayingItem.ProviderIds.Imdb != "" {
-				artworkURL = fmt.Sprintf("%s?imdb=%s", bridgeApi, sess.NowPlayingItem.ProviderIds.Imdb)
-			} else if sess.NowPlayingItem.ProviderIds.Tvdb != "" {
-				artworkURL = fmt.Sprintf("%s?tvdb=%s", bridgeApi, sess.NowPlayingItem.ProviderIds.Tvdb)
-			} else {
-				// should just fallback to using the large image key
-				artworkURL = "jellyfin"
-			}
-		} else {
-			artworkURL = fmt.Sprintf("%s/Items/%s/Images/Primary?fillWidth=400&quality=85",
-				cfg.JellyfinURL,
-				targetImageID,
+			err = dc.SetWatching(
+				presence.Title,
+				presence.State,
+				presence.TitleURL,
+				presence.ArtworkURL,
+				presence.StartEpoch,
+				presence.EndEpoch,
 			)
 		}
-
-		if cfg.UseDBLink {
-			if sess.NowPlayingItem.ProviderIds.Imdb != "" {
-				rpcTitleURL = fmt.Sprintf("https://www.imdb.com/title/%s", sess.NowPlayingItem.ProviderIds.Imdb)
-			} else if sess.NowPlayingItem.ProviderIds.Tvdb != "" {
-				// was kinda lazy and couldn't find a way to link straight to tvdb page from id
-				// fuck tvdb anyway shits ass
-				// TODO helper func to resolve direct tvdb link from id
-				rpcTitleURL = fmt.Sprintf("https://thetvdb.com/search?query=%s", sess.NowPlayingItem.ProviderIds.Tvdb)
-			} else {
-				Warn("unable to find db link for media")
-			}
-		}
-
-		if sess.PlayState.IsPaused {
-			err := dc.SetPaused(rpcTitle, rpcTitleURL, artworkURL)
-			if err != nil {
-				Fatal("failed to update discord status: %v", err)
-			}
-		} else {
-			// to have a time bar in our rpc activity we need a start and end epoch
-			// and the current time along that is calculated from our now time epoch (by discord)
-			// so in order for our time bar to be correct we need to
-			// subtract the current position from our current time
-
-			currentPosSec := sess.PlayState.PositionTicks / 10000000
-			totalRunSec := sess.NowPlayingItem.RunTimeTicks / 10000000
-
-			now := time.Now().UnixMilli()
-			remainingSec := totalRunSec - currentPosSec
-
-			startEpoch := now - (currentPosSec * 1000)
-			endEpoch := now + (remainingSec * 1000)
-
-			// then we set our activity status using the current playing item + epochs we calculated
-			err = dc.SetWatching(rpcTitle, rpcState, rpcTitleURL, artworkURL, startEpoch, endEpoch)
-			if err != nil {
-				Fatal("failed to update discord status: %v", err)
-			}
+		if err != nil {
+			Fatal("failed to update discord status: %v", err)
 		}
 	}
 }
