@@ -170,73 +170,69 @@ func (dc *DiscordConn) send(opcode uint32, payload []byte) error {
 func (dc *DiscordConn) SetWatching(title, status, titleURL, arturl string, startEpoch, endEpoch int64) error {
 	// if the title or status are emtpy just send an empty activity to clear
 	if title == "" && status == "" {
-		p := Payload{
-			Cmd:   "SET_ACTIVITY",
-			Nonce: "1",
-			Args:  Args{PID: os.Getpid()},
-		}
-		payloadJSON, _ := json.Marshal(p)
-		return dc.send(1, payloadJSON)
+		return dc.setActivity(Activity{})
 	}
 
-	p := Payload{
-		Cmd:   "SET_ACTIVITY",
-		Nonce: "1",
-		Args: Args{
-			PID: os.Getpid(),
-			Activity: Activity{
-				Type:       3,
-				Details:    title,
-				DetailsURL: titleURL,
-				State:      status,
-				Instance:   true,
-				Assets: &Assets{
-					LargeImage: arturl,
-					LargeText:  fmt.Sprintf("jellyrpc %s", gitVersion),
-				},
-			},
+	activity := Activity{
+		Type:       3,
+		Details:    title,
+		DetailsURL: titleURL,
+		State:      status,
+		Instance:   true,
+		Assets: &Assets{
+			LargeImage: arturl,
+			LargeText:  fmt.Sprintf("jellyrpc %s", gitVersion),
 		},
 	}
 
 	if startEpoch > 0 {
-		p.Args.Activity.Timestamps = &Timestamps{
+		activity.Timestamps = &Timestamps{
 			Start: startEpoch,
 			End:   endEpoch,
 		}
 	}
 
-	payloadJSON, err := json.Marshal(p)
-	if err != nil {
-		return err
-	}
-
-	return dc.send(1, payloadJSON)
+	return dc.setActivity(activity)
 }
 
 // simeple func to set a "paused" state
 // attempted to try send an empty SET_ACTIVITY but that doesn't
 // clear the rpc activity, instead fallsback to something adhoc
 func (dc *DiscordConn) SetPaused(title, titleURL, arturl string) error {
+	return dc.setActivity(Activity{
+		Type:       3,
+		Details:    title,
+		DetailsURL: titleURL,
+		State:      "Paused",
+		Instance:   true,
+		Assets: &Assets{
+			LargeImage: arturl,
+			LargeText:  fmt.Sprintf("jellyrpc %s", gitVersion),
+		},
+	})
+}
+
+func (dc *DiscordConn) setActivity(activity Activity) error {
 	p := Payload{
 		Cmd:   "SET_ACTIVITY",
 		Nonce: "1",
 		Args: Args{
-			PID: os.Getpid(),
-			Activity: Activity{
-				Type:       3,
-				Details:    title,
-				DetailsURL: titleURL,
-				State:      "Paused",
-				Instance:   true,
-				Assets: &Assets{
-					LargeImage: arturl,
-					LargeText:  fmt.Sprintf("jellyrpc %s", gitVersion),
-				},
-			},
+			PID:      os.Getpid(),
+			Activity: activity,
 		},
 	}
-	payloadJSON, _ := json.Marshal(p)
-	return dc.send(1, payloadJSON)
+	payloadJSON, err := json.Marshal(p)
+	if err != nil {
+		return err
+	}
+	if err := dc.send(1, payloadJSON); err != nil {
+		return err
+	}
+
+	// discord replies to every frame, drain it so the socket buffer doesnt
+	// fill up and stall writes over a long running session
+	_, _, err = dc.readFrame()
+	return err
 }
 
 // just close the socket connection without sending an
