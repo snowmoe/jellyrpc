@@ -26,7 +26,7 @@ features:
 > requires `git`, `go` and `make`
 
 ```bash
-git clone https://github.com/reckedpr/jellyrpc
+git clone https://github.com/snowmoe/jellyrpc
 
 cd jellyrpc
 
@@ -99,7 +99,7 @@ you can then just use this token as value for the `JELLYFIN_KEY` option in confi
 installing manually depends on how you plan to run the daemon as a service, but you can get running by:
 
 ```bash
-git clone https://github.com/reckedpr/jellyrpc
+git clone https://github.com/snowmoe/jellyrpc
 
 cd jellyrpc
 
