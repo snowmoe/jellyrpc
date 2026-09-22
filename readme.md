@@ -9,8 +9,6 @@ a simple jellyfin discord rpc daemon written in golang
 
 supports local and public jellyfin instances, and doesn't require any extra api keys for cover art support on local instances
 
-> local cover art is resolved by a lightweight bridge (rot.sh) from the media id only, it logs nothing and only discord ever fetches the image
-
 ```md
 features:
   - lightweight
@@ -20,6 +18,8 @@ features:
   - efficient socket mgmt
   - systemd user service
 ```
+
+> local cover art is resolved by a lightweight bridge (rot.sh) from the media id only, it logs nothing and only discord ever fetches the image
 
 ### install
 
@@ -33,9 +33,9 @@ cd jellyrpc
 make install
 ```
 
-the makefile install only supports unix like systemd operating systems, daemon can run on non sytemd systems but will require manual service setup (e.g. on openrc, runit, etc.)
+the makefile install only supports unix like operating systems using systemd, daemon can run on non sytemd systems but will require manual service setup (e.g. on openrc, runit, etc.)
 
-should run on macos but untested, no support for windows
+should run on macos but untested, *no support for windows*
 
 #### config
 
@@ -78,7 +78,7 @@ alternatively you can use the below js snippet by pressing F12 and pasting it in
         }
         return originalFetch.apply(this, args);
     };
-    console.log("click literally anything and it should output ur token");
+    console.log("click anything and it should output your token");
 })();
 ```
 
@@ -86,13 +86,18 @@ you can then just use this token as value for the `JELLYFIN_KEY` option in confi
 
 </details>
 
-#### optional settings
+#### full config options
 
-- `POLL_RATE` can be set to an integer(>0) to set how often the daemon will poll in seconds
-- `PAUSE_TIMEOUT` can be set to an integer of minutes to drop the presence after being paused that long (defaults to 10, set `0` to disable)
-- `APP_ID` can be set to override the default discord application id with your own
-- `DB_LINK` can be set to `true` to enable a link on the rpc activity to imdb/tvdb
-- `USE_EPISODE_ART` can be set to `true` to prefer using episode specific cover art
+|option|default|meaning|
+|-|:-:|-|
+|`JELLYFIN_URL`|  | jellyfin instance to use
+|`JELLYFIN_KEY`|  | jellyfin api key to authenticate api requests
+|`JELLYFIN_USER`|  | jellyfin user(name) to get the status of
+|`POLL_RATE`| 5 | how often the daemon will poll in seconds
+|`PAUSE_TIMEOUT`| 10 | number of minutes idle before stopping rpc (0 = disabled)
+|`APP_ID`| [main.go:12](https://github.com/snowmoe/jellyrpc/blob/701e2ea3de536bb47bf0dcf663f1c45ca4cb23c3/main.go#L12) | discord app id to use for rpc
+|`DB_LINK`| false | use rpc title as a link to imdb/tvdb for the episode
+|`USE_EPISODE_ART`| false | prefer using per episode cover art (for series')
 
 #### manual install
 
@@ -126,4 +131,4 @@ to update run
 git pull && make install
 ```
 
-or if installed manually then `git pull` and rebuild as needed
+or if installed manually then `git pull` and build again as needed
