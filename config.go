@@ -45,11 +45,27 @@ func (cfg *Config) ApplyDefaults(defaultAppID string) {
 	}
 }
 
-func (cfg *Config) Validate() error {
-	if cfg.JellyfinKey == "" || cfg.JellyfinURL == "" || cfg.JellyfinUser == "" {
-		return errors.New("config file missing required values")
+func (cfg *Config) Validate() (error, []string) {
+	var missing []string
+
+	// check all explicity so we can present ALL missing values
+	if cfg.JellyfinKey == "" {
+		missing = append(missing, "JELLYFIN_KEY")
 	}
-	return nil
+
+	if cfg.JellyfinURL == "" {
+		missing = append(missing, "JELLYFIN_URL")
+	}
+
+	if cfg.JellyfinUser == "" {
+		missing = append(missing, "JELLYFIN_USER")
+	}
+
+	if len(missing) > 0 {
+		return errors.New("config file missing required values"), missing
+	}
+
+	return nil, missing
 }
 
 func LoadConfig(path string) (*Config, error) {

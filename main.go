@@ -3,9 +3,11 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 )
 
@@ -48,8 +50,9 @@ func run() error {
 
 	cfg.ApplyDefaults(defaultAppID)
 
-	if err := cfg.Validate(); err != nil {
-		return err
+	err, missing := cfg.Validate()
+	if err != nil {
+		return fmt.Errorf("%w: %s", err, strings.Join(missing, ", "))
 	}
 	Info("loaded config file")
 
