@@ -105,14 +105,14 @@ func LoadConfig(path string) (*Config, error) {
 		case "POLL_RATE":
 			i, err := strconv.Atoi(val)
 			if err != nil {
-				Warn("failed to set poll rate from config: %v\n", err)
+				Warn("failed to set poll rate from config: %v", err)
 				continue
 			}
 			cfg.PollRate = i
 		case "PAUSE_TIMEOUT":
 			i, err := strconv.Atoi(val)
 			if err != nil {
-				Warn("failed to set pause timeout from config: %v\n", err)
+				Warn("failed to set pause timeout from config: %v", err)
 				continue
 			}
 			cfg.PauseTimeout = i
