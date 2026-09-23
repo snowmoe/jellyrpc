@@ -49,9 +49,9 @@ type JellyfinClient struct {
 
 func NewJellyfinClient(cfg *Config) *JellyfinClient {
 	return &JellyfinClient{
-		BaseURL:    cfg.JellyfinURL,
-		APIKey:     cfg.JellyfinKey,
-		UserName:   cfg.JellyfinUser,
+		BaseURL:  cfg.JellyfinURL,
+		APIKey:   cfg.JellyfinKey,
+		UserName: cfg.JellyfinUser,
 		// timeout so a hung jellyfin connection cant block polling forever
 		HTTPClient: &http.Client{Timeout: 10 * time.Second},
 	}
@@ -90,7 +90,7 @@ func (c *JellyfinClient) GetActiveSession(ctx context.Context) (*Session, error)
 	}
 
 	for _, s := range sessions {
-		if s.UserName == c.UserName && s.NowPlayingItem.Name != "" {
+		if strings.EqualFold(s.UserName, c.UserName) && s.NowPlayingItem.Name != "" {
 			return &s, nil
 		}
 	}
