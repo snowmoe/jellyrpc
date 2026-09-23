@@ -142,12 +142,16 @@ func (a *App) poll(ctx context.Context, dc *PresenceClient, now func() time.Time
 		*dc = conn
 	}
 
+	presence := BuildPresence(a.Config, sess, now().UnixMilli())
+
 	if a.lastPlaying != sess.NowPlayingItem.Id {
 		a.lastPlaying = sess.NowPlayingItem.Id
 		Info("active playing: %s, id: %s", sess.NowPlayingItem.Name, sess.NowPlayingItem.Id)
-	}
 
-	presence := BuildPresence(a.Config, sess, now().UnixMilli())
+		if a.Config.UseDBLink && presence.TitleURL == "" {
+			Warn("unable to find db link for active media")
+		}
+	}
 
 	var setErr error
 	if presence.Paused {

@@ -86,6 +86,5 @@ func titleURLFor(ids ProviderIds, enabled bool) string {
 		return fmt.Sprintf("https://thetvdb.com/search?query=%s", ids.Tvdb)
 	}
 
-	Warn("unable to find db link for media")
 	return ""
 }
