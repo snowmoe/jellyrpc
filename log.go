@@ -23,3 +23,8 @@ func Fatal(format string, v ...any) {
 	fmt.Fprintf(os.Stderr, "[FATAL] "+format+"\n", v...)
 	os.Exit(1)
 }
+
+func Die(format string, v ...any) {
+	fmt.Fprintf(os.Stderr, "jellyrpc: "+format+"\n", v...)
+	os.Exit(1)
+}

@@ -19,20 +19,68 @@ var (
 )
 
 func main() {
-	if err := run(); err != nil {
-		Fatal("%v", err)
+	var (
+		err    error
+		subCmd string
+	)
+
+	if len(os.Args) <= 1 {
+		subCmd = "run"
+	} else {
+		subCmd = os.Args[1]
 	}
+
+	switch subCmd {
+	case "run":
+		err = run()
+	case "setup", "check":
+		err = fmt.Errorf("%s: not implemented yet", subCmd)
+	case "version", "-v", "--version":
+		fmt.Println(version())
+	case "help", "-h", "--help":
+		printHelp()
+	default:
+		fmt.Fprintf(os.Stderr, "jellyrpc: unknown command: %s\n  run 'jellyrpc help' for a full list of commands\n", subCmd)
+		os.Exit(2)
+	}
+
+	if err != nil {
+		if subCmd == "run" {
+			Fatal("%v", err)
+		}
+
+		Die("%v", err)
+	}
+}
+
+func version() string {
+	if gitVersion != "dev" {
+		return fmt.Sprintf("jellyrpc %s", gitVersion)
+	} else if gitHash != "dev" {
+		return fmt.Sprintf("jellyrpc dev build: commit %s", gitHash)
+	} else {
+		return "jellyrpc dev build"
+	}
+}
+
+func printHelp() {
+	fmt.Print(`simple jellyfin discord rpc daemon.
+
+USAGE
+  jellyrpc <subcommand>
+
+SUBCOMMANDS
+  run      start the daemon (default)
+  setup    run the setup wizard
+  check    test the config and jellyfin connection
+  version  print jellyrpc build version or hash
+  help     show this message
+`)
 }
 
 func run() error {
 	Info("starting jellyfin rpc daemon")
-	if gitVersion != "dev" {
-		Info("running jellyrpc %s", gitVersion)
-	} else if gitHash != "dev" {
-		Info("running jellyrpc from commit: %s", gitHash)
-	} else {
-		Info("running dev build")
-	}
+	Info("running %s", version())
 
 	configDir, err := os.UserConfigDir()
 	if err != nil {
