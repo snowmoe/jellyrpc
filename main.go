@@ -2,13 +2,11 @@ package main
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"os"
 	"os/signal"
-	"path/filepath"
-	"strings"
 	"syscall"
+	"time"
 )
 
 const defaultAppID = "1517892834907394229"
@@ -78,31 +76,50 @@ SUBCOMMANDS
 `)
 }
 
+func waitForConfig(ctx context.Context, cfgPath string, interval time.Duration) (*Config, error) {
+	var lastMsg string
+
+	for {
+		cfg, err := LoadValidConfig(cfgPath)
+		if err == nil {
+			return cfg, nil
+		}
+
+		msg := err.Error()
+		if msg != lastMsg {
+			Warn("waiting for valid config: %v", err)
+			lastMsg = msg
+		}
+
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(interval):
+		}
+	}
+}
+
 func run() error {
 	Info("starting jellyfin rpc daemon")
 	Info("running %s", version())
 
-	configDir, err := os.UserConfigDir()
+	cfgPath, err := GetConfigPath()
 	if err != nil {
 		return err
 	}
 
-	cfgPath := filepath.Join(configDir, "jellyrpc", "config")
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
 
-	cfg, err := LoadConfig(cfgPath)
-	if errors.Is(err, os.ErrNotExist) {
-		return errors.New("couldn't find config file, does it exist?")
-	} else if err != nil {
+	cfg, err := waitForConfig(ctx, cfgPath, 3*time.Second)
+	if err != nil {
+		if ctx.Err() != nil {
+			// return nil because we were told to stop
+			return nil
+		}
 		return err
 	}
-
-	cfg.ApplyDefaults(defaultAppID)
-
-	err, missing := cfg.Validate()
-	if err != nil {
-		return fmt.Errorf("%w: %s", err, strings.Join(missing, ", "))
-	}
-	Info("loaded config file")
+	Info("config file loaded")
 
 	if cfg.AppID != defaultAppID {
 		Info("using custom discord app id: %s", cfg.AppID)
@@ -111,9 +128,6 @@ func run() error {
 	if cfg.UseEpisodeArt {
 		Info("preferring episode art instead of series")
 	}
-
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
 
 	app := &App{
 		Config:   cfg,

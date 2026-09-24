@@ -42,7 +42,7 @@ func TestMissingRequiredValues(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			_, missing := tc.config.Validate()
+			missing, _ := tc.config.Validate()
 
 			if !slices.Equal(missing, tc.expected) {
 				t.Errorf("expected: %v, got: %v", tc.expected, missing)
