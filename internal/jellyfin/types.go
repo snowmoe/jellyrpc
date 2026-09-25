@@ -39,3 +39,10 @@ type SystemInfo struct {
 	ID                     string `json:"Id"`
 	StartupWizardCompleted bool   `json:"StartupWizardCompleted"`
 }
+
+type User struct {
+	Name   string `json:"Name"`
+	Policy struct {
+		IsAdministrator bool `json:"IsAdministrator"`
+	} `json:"Policy"`
+}
