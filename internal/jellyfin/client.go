@@ -145,7 +145,7 @@ func (c *Client) authHeader() string {
 	return mediaBrowser
 }
 
-func (c *Client) GetActiveSession(ctx context.Context) (*Session, error) {
+func (c *Client) ActiveSession(ctx context.Context) (*Session, error) {
 	var sessions []Session
 
 	err := c.do(ctx, "GET", "/Sessions", nil, &sessions)
@@ -163,7 +163,7 @@ func (c *Client) GetActiveSession(ctx context.Context) (*Session, error) {
 
 // I could handle 503 and use returned Retry-After + Message to log and delay next poll
 // but that's bullshit and I'll think about it another day.
-func (c *Client) GetPublicSystemInfo(ctx context.Context) (SystemInfo, error) {
+func (c *Client) PublicSystemInfo(ctx context.Context) (SystemInfo, error) {
 	var info SystemInfo
 
 	err := c.do(ctx, "GET", "/System/Info/Public", nil, &info)
@@ -174,7 +174,7 @@ func (c *Client) GetPublicSystemInfo(ctx context.Context) (SystemInfo, error) {
 	return info, nil
 }
 
-func (c *Client) GetQuickConnectEnabled(ctx context.Context) (bool, error) {
+func (c *Client) QuickConnectEnabled(ctx context.Context) (bool, error) {
 	var ok bool
 
 	err := c.do(ctx, "GET", "/QuickConnect/Enabled", nil, &ok)

@@ -9,7 +9,7 @@ import (
 )
 
 type SessionProvider interface {
-	GetActiveSession(ctx context.Context) (*jellyfin.Session, error)
+	ActiveSession(ctx context.Context) (*jellyfin.Session, error)
 }
 
 type PresenceClient interface {
@@ -83,7 +83,7 @@ func (a *App) Run(ctx context.Context) error {
 // poll runs a single tick, transient errors are logged and swallowed so the
 // daemon keeps running across jellyfin/discord/network blips instead of dying
 func (a *App) poll(ctx context.Context, dc *PresenceClient, now func() time.Time) {
-	sess, err := a.Sessions.GetActiveSession(ctx)
+	sess, err := a.Sessions.ActiveSession(ctx)
 	if err != nil {
 		// warn once on the way down, stay quiet until it recovers
 		if !a.sessionDown {

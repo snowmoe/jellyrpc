@@ -13,7 +13,7 @@ type fakeSessions struct {
 	err  error
 }
 
-func (f *fakeSessions) GetActiveSession(context.Context) (*jellyfin.Session, error) {
+func (f *fakeSessions) ActiveSession(context.Context) (*jellyfin.Session, error) {
 	return f.sess, f.err
 }
 
