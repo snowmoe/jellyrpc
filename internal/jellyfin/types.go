@@ -28,3 +28,14 @@ type ProviderIDs struct {
 	Tmdb string `json:"Tmdb"`
 	Tvdb string `json:"Tvdb"`
 }
+
+// /System/Info/Public
+// https://api.jellyfin.org/#tag/System/operation/GetPublicSystemInfo
+type infoResponse struct {
+	LocalAddress           string `json:"LocalAddress"`
+	ServerName             string `json:"ServerName"`
+	Version                string `json:"Version"`
+	ProductName            string `json:"ProductName"`
+	ID                     string `json:"Id"`
+	StartupWizardCompleted bool   `json:"StartupWizardCompleted"`
+}
