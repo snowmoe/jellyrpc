@@ -4,14 +4,16 @@ import (
 	"context"
 	"testing"
 	"time"
+
+	"github.com/snowmoe/jellyrpc/internal/jellyfin"
 )
 
 type fakeSessions struct {
-	sess *Session
+	sess *jellyfin.Session
 	err  error
 }
 
-func (f *fakeSessions) GetActiveSession(context.Context) (*Session, error) {
+func (f *fakeSessions) GetActiveSession(context.Context) (*jellyfin.Session, error) {
 	return f.sess, f.err
 }
 
@@ -61,10 +63,10 @@ func TestAppRunUpdatesPresenceAndClosesOnCancel(t *testing.T) {
 			PollRate:    1,
 			AppID:       "app-id",
 		},
-		Sessions: &fakeSessions{sess: &Session{
-			NowPlayingItem: NowPlayingItem{
+		Sessions: &fakeSessions{sess: &jellyfin.Session{
+			NowPlayingItem: jellyfin.NowPlayingItem{
 				Name:         "Movie",
-				Id:           "movie-id",
+				ID:           "movie-id",
 				Type:         "Movie",
 				RunTimeTicks: 120 * 10000000,
 			},
@@ -111,8 +113,8 @@ func TestPollPauseTimeoutClosesSocket(t *testing.T) {
 	current := time.UnixMilli(0)
 	now := func() time.Time { return current }
 
-	sess := &Session{
-		NowPlayingItem: NowPlayingItem{Name: "Movie", Id: "movie-id", Type: "Movie"},
+	sess := &jellyfin.Session{
+		NowPlayingItem: jellyfin.NowPlayingItem{Name: "Movie", ID: "movie-id", Type: "Movie"},
 	}
 	sess.PlayState.IsPaused = true
 

@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+
+	"github.com/snowmoe/jellyrpc/internal/jellyfin"
 )
 
 type Config struct {
@@ -125,7 +127,7 @@ func loadConfig(path string) (*Config, error) {
 
 		switch key {
 		case "JELLYFIN_URL":
-			cfg.JellyfinURL = SanitiseURL(val)
+			cfg.JellyfinURL = jellyfin.SanitiseURL(val)
 		case "JELLYFIN_KEY":
 			cfg.JellyfinKey = val
 		case "JELLYFIN_USER":

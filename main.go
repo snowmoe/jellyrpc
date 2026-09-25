@@ -7,6 +7,9 @@ import (
 	"os/signal"
 	"syscall"
 	"time"
+
+	"github.com/snowmoe/jellyrpc/internal/discord"
+	"github.com/snowmoe/jellyrpc/internal/jellyfin"
 )
 
 const defaultAppID = "1517892834907394229"
@@ -129,14 +132,14 @@ func run() error {
 		Info("preferring episode art instead of series")
 	}
 
-	client := NewJellyfinClient(cfg.JellyfinURL, cfg.JellyfinKey)
+	client := jellyfin.NewClient(cfg.JellyfinURL, cfg.JellyfinKey, gitVersion)
 	client.UserName = cfg.JellyfinUser
 
 	app := &App{
 		Config:   cfg,
 		Sessions: client,
 		Connect: func(clientID string) (PresenceClient, error) {
-			return NewDiscordConn(clientID)
+			return discord.NewConn(clientID, gitVersion)
 		},
 	}
 

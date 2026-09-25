@@ -1,29 +1,33 @@
-package main
+package presence
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/snowmoe/jellyrpc/internal/jellyfin"
+)
 
 func TestBuildPresenceEpisode(t *testing.T) {
-	cfg := &Config{
+	opts := Options{
 		JellyfinURL:   "https://jelly.example.com",
 		UseDBLink:     true,
 		UseEpisodeArt: false,
 	}
-	sess := &Session{
-		NowPlayingItem: NowPlayingItem{
+	sess := &jellyfin.Session{
+		NowPlayingItem: jellyfin.NowPlayingItem{
 			Name:              "Pilot",
-			Id:                "episode-id",
+			ID:                "episode-id",
 			Type:              "Episode",
 			RunTimeTicks:      180 * 10000000,
 			SeriesName:        "Example Show",
 			SeriesId:          "series-id",
 			ParentIndexNumber: 1,
 			IndexNumber:       2,
-			ProviderIds:       ProviderIds{Imdb: "tt123"},
+			ProviderIDs:       jellyfin.ProviderIDs{Imdb: "tt123"},
 		},
 	}
 	sess.PlayState.PositionTicks = 30 * 10000000
 
-	got := BuildPresence(cfg, sess, 100000)
+	got := Build(opts, sess, 100000)
 
 	if got.Title != "Example Show" {
 		t.Fatalf("Title = %q, want %q", got.Title, "Example Show")
@@ -43,17 +47,17 @@ func TestBuildPresenceEpisode(t *testing.T) {
 }
 
 func TestBuildPresenceLocalArtworkFallback(t *testing.T) {
-	cfg := &Config{JellyfinURL: "http://192.168.1.10:8096"}
-	sess := &Session{
-		NowPlayingItem: NowPlayingItem{
+	opts := Options{JellyfinURL: "http://192.168.1.10:8096"}
+	sess := &jellyfin.Session{
+		NowPlayingItem: jellyfin.NowPlayingItem{
 			Name:        "Movie",
-			Id:          "movie-id",
+			ID:          "movie-id",
 			Type:        "Movie",
-			ProviderIds: ProviderIds{Tmdb: "42"},
+			ProviderIDs: jellyfin.ProviderIDs{Tmdb: "42"},
 		},
 	}
 
-	got := BuildPresence(cfg, sess, 0)
+	got := Build(opts, sess, 0)
 
 	if got.ArtworkURL != "https://rot.sh/poster?tmdb=42" {
 		t.Fatalf("ArtworkURL = %q", got.ArtworkURL)

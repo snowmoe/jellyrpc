@@ -1,13 +1,17 @@
-package main
+package presence
 
-import "fmt"
+import (
+	"fmt"
+
+	"github.com/snowmoe/jellyrpc/internal/jellyfin"
+)
 
 const bridgeAPI = "https://rot.sh/poster"
 
 // jellyfin reports time in 100ns ticks so 1e7 of them make a second
 const ticksPerSecond = 10000000
 
-type Presence struct {
+type Activity struct {
 	Title      string
 	State      string
 	TitleURL   string
@@ -17,16 +21,22 @@ type Presence struct {
 	Paused     bool
 }
 
-func BuildPresence(cfg *Config, sess *Session, nowMillis int64) Presence {
+type Options struct {
+	JellyfinURL   string
+	UseEpisodeArt bool
+	UseDBLink     bool
+}
+
+func Build(opts Options, sess *jellyfin.Session, nowMillis int64) Activity {
 	item := sess.NowPlayingItem
 
-	title, state, imageID := mediaDisplay(item, cfg.UseEpisodeArt)
-	artworkURL := artworkURLFor(cfg.JellyfinURL, imageID, item.ProviderIds)
+	title, state, imageID := mediaDisplay(item, opts.UseEpisodeArt)
+	artworkURL := artworkURLFor(opts.JellyfinURL, imageID, item.ProviderIDs)
 
-	p := Presence{
+	p := Activity{
 		Title:      title,
 		State:      state,
-		TitleURL:   titleURLFor(item.ProviderIds, cfg.UseDBLink),
+		TitleURL:   titleURLFor(item.ProviderIDs, opts.UseDBLink),
 		ArtworkURL: artworkURL,
 		Paused:     sess.PlayState.IsPaused,
 	}
@@ -43,23 +53,23 @@ func BuildPresence(cfg *Config, sess *Session, nowMillis int64) Presence {
 	return p
 }
 
-func mediaDisplay(item NowPlayingItem, useEpisodeArt bool) (title, state, imageID string) {
+func mediaDisplay(item jellyfin.NowPlayingItem, useEpisodeArt bool) (title, state, imageID string) {
 	if item.Type != "Episode" {
-		return item.Name, "", item.Id
+		return item.Name, "", item.ID
 	}
 
 	title = item.SeriesName
 	state = fmt.Sprintf("S%02d:E%02d - %s", item.ParentIndexNumber, item.IndexNumber, item.Name)
 	if useEpisodeArt || item.SeriesId == "" {
-		imageID = item.Id
+		imageID = item.ID
 	} else {
 		imageID = item.SeriesId
 	}
 	return title, state, imageID
 }
 
-func artworkURLFor(jellyfinURL, imageID string, ids ProviderIds) string {
-	if IsLocalInstance(jellyfinURL) {
+func artworkURLFor(jellyfinURL, imageID string, ids jellyfin.ProviderIDs) string {
+	if jellyfin.IsLocalInstance(jellyfinURL) {
 		if ids.Tmdb != "" {
 			return fmt.Sprintf("%s?tmdb=%s", bridgeAPI, ids.Tmdb)
 		}
@@ -75,7 +85,7 @@ func artworkURLFor(jellyfinURL, imageID string, ids ProviderIds) string {
 	return fmt.Sprintf("%s/Items/%s/Images/Primary?fillWidth=400&quality=85", jellyfinURL, imageID)
 }
 
-func titleURLFor(ids ProviderIds, enabled bool) string {
+func titleURLFor(ids jellyfin.ProviderIDs, enabled bool) string {
 	if !enabled {
 		return ""
 	}

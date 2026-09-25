@@ -3,10 +3,13 @@ package main
 import (
 	"context"
 	"time"
+
+	"github.com/snowmoe/jellyrpc/internal/jellyfin"
+	"github.com/snowmoe/jellyrpc/internal/presence"
 )
 
 type SessionProvider interface {
-	GetActiveSession(ctx context.Context) (*Session, error)
+	GetActiveSession(ctx context.Context) (*jellyfin.Session, error)
 }
 
 type PresenceClient interface {
@@ -106,7 +109,7 @@ func (a *App) poll(ctx context.Context, dc *PresenceClient, now func() time.Time
 
 	// a new item restarts the pause window so a freshly opened but paused
 	// item still gets shown and its own idle timeout
-	if sess.NowPlayingItem.Id != a.lastPlaying {
+	if sess.NowPlayingItem.ID != a.lastPlaying {
 		a.pausedSince = time.Time{}
 	}
 
@@ -142,28 +145,36 @@ func (a *App) poll(ctx context.Context, dc *PresenceClient, now func() time.Time
 		*dc = conn
 	}
 
-	presence := BuildPresence(a.Config, sess, now().UnixMilli())
+	p := presence.Build(
+		presence.Options{
+			JellyfinURL:   a.Config.JellyfinURL,
+			UseEpisodeArt: a.Config.UseEpisodeArt,
+			UseDBLink:     a.Config.UseDBLink,
+		},
+		sess,
+		now().UnixMilli(),
+	)
 
-	if a.lastPlaying != sess.NowPlayingItem.Id {
-		a.lastPlaying = sess.NowPlayingItem.Id
-		Info("active playing: %s, id: %s", sess.NowPlayingItem.Name, sess.NowPlayingItem.Id)
+	if a.lastPlaying != sess.NowPlayingItem.ID {
+		a.lastPlaying = sess.NowPlayingItem.ID
+		Info("active playing: %s, id: %s", sess.NowPlayingItem.Name, sess.NowPlayingItem.ID)
 
-		if a.Config.UseDBLink && presence.TitleURL == "" {
+		if a.Config.UseDBLink && p.TitleURL == "" {
 			Warn("unable to find db link for active media")
 		}
 	}
 
 	var setErr error
-	if presence.Paused {
-		setErr = (*dc).SetPaused(presence.Title, presence.TitleURL, presence.ArtworkURL)
+	if p.Paused {
+		setErr = (*dc).SetPaused(p.Title, p.TitleURL, p.ArtworkURL)
 	} else {
 		setErr = (*dc).SetWatching(
-			presence.Title,
-			presence.State,
-			presence.TitleURL,
-			presence.ArtworkURL,
-			presence.StartEpoch,
-			presence.EndEpoch,
+			p.Title,
+			p.State,
+			p.TitleURL,
+			p.ArtworkURL,
+			p.StartEpoch,
+			p.EndEpoch,
 		)
 	}
 
@@ -179,4 +190,16 @@ func (a *App) reset(dc *PresenceClient) {
 		(*dc).Close()
 		*dc = nil
 	}
+}
+
+func isSessionActive(sess *jellyfin.Session) bool {
+	if sess == nil {
+		return false
+	}
+
+	if sess.NowPlayingItem.Name == "" || sess.NowPlayingItem.ID == "" {
+		return false
+	}
+
+	return true
 }
