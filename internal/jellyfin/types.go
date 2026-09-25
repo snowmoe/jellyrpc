@@ -31,7 +31,7 @@ type ProviderIDs struct {
 
 // /System/Info/Public
 // https://api.jellyfin.org/#tag/System/operation/GetPublicSystemInfo
-type infoResponse struct {
+type SystemInfo struct {
 	LocalAddress           string `json:"LocalAddress"`
 	ServerName             string `json:"ServerName"`
 	Version                string `json:"Version"`

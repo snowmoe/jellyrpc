@@ -163,16 +163,15 @@ func (c *Client) GetActiveSession(ctx context.Context) (*Session, error) {
 
 // I could handle 503 and use returned Retry-After + Message to log and delay next poll
 // but that's bullshit and I'll think about it another day.
-// returns Server Name, ID, and an error, sue me
-func (c *Client) GetPublicSystemInfo(ctx context.Context) (string, string, error) {
-	var info infoResponse
+func (c *Client) GetPublicSystemInfo(ctx context.Context) (SystemInfo, error) {
+	var info SystemInfo
 
 	err := c.do(ctx, "GET", "/System/Info/Public", nil, &info)
 	if err != nil {
-		return "", "", err
+		return info, err
 	}
 
-	return info.ServerName, info.ID, nil
+	return info, nil
 }
 
 func (c *Client) GetQuickConnectEnabled(ctx context.Context) (bool, error) {
