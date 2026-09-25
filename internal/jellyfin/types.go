@@ -1,5 +1,7 @@
 package jellyfin
 
+import "time"
+
 // /Session endpoint json structure
 // https://api.jellyfin.org/#tag/Session/operation/GetSessions
 type Session struct {
@@ -45,4 +47,15 @@ type User struct {
 	Policy struct {
 		IsAdministrator bool `json:"IsAdministrator"`
 	} `json:"Policy"`
+}
+
+type QuickConnect struct {
+	Authenticated bool      `json:"Authenticated"`
+	Secret        string    `json:"Secret"`
+	Code          string    `json:"Code"`
+	DeviceID      string    `json:"DeviceId"`
+	DeviceName    string    `json:"DeviceName"`
+	AppName       string    `json:"AppName"`
+	AppVersion    string    `json:"AppVersion"`
+	DateAdded     time.Time `json:"DateAdded"`
 }

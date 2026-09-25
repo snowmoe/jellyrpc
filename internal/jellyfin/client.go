@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
 	"time"
@@ -208,4 +209,37 @@ func (c *Client) Users(ctx context.Context) ([]User, error) {
 	}
 
 	return users, nil
+}
+
+func (c *Client) InitiateQC(ctx context.Context) (QuickConnect, error) {
+	var qc QuickConnect
+
+	err := c.do(ctx, "POST", "/QuickConnect/Initiate", nil, &qc)
+	if err != nil {
+		return QuickConnect{}, nil
+	}
+
+	return qc, nil
+}
+
+// checks the auth status of a quick connect request
+func (c *Client) ConnectQC(ctx context.Context, qc QuickConnect) (bool, error) {
+	if qc.Secret == "" {
+		return false, errors.New("missing QuickConnect secret")
+	}
+
+	var qcResp QuickConnect
+
+	q := url.Values{}
+	q.Set("secret", qc.Secret)
+	query := q.Encode()
+
+	path := "/QuickConnect/Connect?" + query
+
+	err := c.do(ctx, "GET", path, nil, &qcResp)
+	if err != nil {
+		return false, err
+	}
+
+	return qcResp.Authenticated, nil
 }
