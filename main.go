@@ -129,9 +129,12 @@ func run() error {
 		Info("preferring episode art instead of series")
 	}
 
+	client := NewJellyfinClient(cfg.JellyfinURL, cfg.JellyfinKey)
+	client.UserName = cfg.JellyfinUser
+
 	app := &App{
 		Config:   cfg,
-		Sessions: NewJellyfinClient(cfg),
+		Sessions: client,
 		Connect: func(clientID string) (PresenceClient, error) {
 			return NewDiscordConn(clientID)
 		},

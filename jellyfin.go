@@ -2,11 +2,14 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"net"
 	"net/http"
 	"net/url"
+	"os"
 	"strings"
 	"time"
 )
@@ -44,14 +47,29 @@ type JellyfinClient struct {
 	BaseURL    string
 	APIKey     string
 	UserName   string
+	DeviceID   string
+	Hostname   string
 	HTTPClient *http.Client
 }
 
-func NewJellyfinClient(cfg *Config) *JellyfinClient {
+func getDeviceID(hostname string) string {
+	sum := sha256.Sum256([]byte("jellyrpc:" + hostname))
+	return hex.EncodeToString(sum[:16])
+}
+
+func NewJellyfinClient(baseURL, apiKey string) *JellyfinClient {
+	hostname, err := os.Hostname()
+	if err != nil {
+		hostname = "unknown"
+	}
+
+	deviceID := getDeviceID(hostname)
+
 	return &JellyfinClient{
-		BaseURL:  cfg.JellyfinURL,
-		APIKey:   cfg.JellyfinKey,
-		UserName: cfg.JellyfinUser,
+		BaseURL:  baseURL,
+		APIKey:   apiKey,
+		Hostname: hostname,
+		DeviceID: deviceID,
 		// timeout so a hung jellyfin connection cant block polling forever
 		HTTPClient: &http.Client{Timeout: 10 * time.Second},
 	}
