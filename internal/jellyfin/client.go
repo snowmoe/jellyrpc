@@ -223,15 +223,15 @@ func (c *Client) InitiateQC(ctx context.Context) (QuickConnect, error) {
 }
 
 // checks the auth status of a quick connect request
-func (c *Client) ConnectQC(ctx context.Context, qc QuickConnect) (bool, error) {
-	if qc.Secret == "" {
+func (c *Client) ConnectQC(ctx context.Context, secret string) (bool, error) {
+	if secret == "" {
 		return false, errors.New("missing QuickConnect secret")
 	}
 
 	var qcResp QuickConnect
 
 	q := url.Values{}
-	q.Set("secret", qc.Secret)
+	q.Set("secret", secret)
 	query := q.Encode()
 
 	path := "/QuickConnect/Connect?" + query
@@ -242,4 +242,25 @@ func (c *Client) ConnectQC(ctx context.Context, qc QuickConnect) (bool, error) {
 	}
 
 	return qcResp.Authenticated, nil
+}
+
+func (c *Client) AuthenticateQC(ctx context.Context, secret string) (Authorization, error) {
+	if secret == "" {
+		return Authorization{}, errors.New("missing QuickConnect secret")
+	}
+
+	var auth Authorization
+
+	body := struct {
+		Secret string
+	}{
+		Secret: secret,
+	}
+
+	err := c.do(ctx, "POST", "/Users/AuthenticateWithQuickConnect", body, &auth)
+	if err != nil {
+		return Authorization{}, err
+	}
+
+	return auth, nil
 }

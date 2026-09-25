@@ -59,3 +59,9 @@ type QuickConnect struct {
 	AppVersion    string    `json:"AppVersion"`
 	DateAdded     time.Time `json:"DateAdded"`
 }
+
+// america yuck zzzzzzzzz
+type Authorization struct {
+	User  User   `json:"User"`
+	Token string `json:"AccessToken"`
+}
