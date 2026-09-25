@@ -79,13 +79,17 @@ func (cfg *Config) Validate() ([]string, error) {
 }
 
 func LoadValidConfig(cfgPath string) (*Config, error) {
-	cfg, err := loadConfig(cfgPath)
+	cfg, unknown, err := loadConfig(cfgPath)
 	if errors.Is(err, os.ErrNotExist) {
 		// TODO prompt to run "jellyrpc setup" as a fix?
 		return nil, fmt.Errorf("file doesn't exist: %s", cfgPath)
 	} else if err != nil {
 		// TODO catch other error types explicity, e.g. perm issues
 		return nil, err
+	}
+
+	if len(unknown) > 0 {
+		Warn("unknown config key(s): %s", strings.Join(unknown, ", "))
 	}
 
 	cfg.ApplyDefaults(defaultAppID)
@@ -98,12 +102,14 @@ func LoadValidConfig(cfgPath string) (*Config, error) {
 	return cfg, nil
 }
 
-func loadConfig(path string) (*Config, error) {
+func loadConfig(path string) (*Config, []string, error) {
 	file, err := os.Open(path)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	defer file.Close()
+
+	var unknown []string
 
 	// -1 marks pause timeout as unset so ApplyDefaults can tell it apart from
 	// an explicit 0 which disables the timeout
@@ -153,14 +159,14 @@ func loadConfig(path string) (*Config, error) {
 		case "USE_EPISODE_ART":
 			cfg.UseEpisodeArt = parseBool(val)
 		default:
-			Warn("unknown config key: %s", key)
+			unknown = append(unknown, key)
 		}
 	}
 
 	err = scanner.Err()
 	if err != nil {
-		return nil, err
+		return nil, unknown, err
 	}
 
-	return cfg, nil
+	return cfg, unknown, nil
 }
