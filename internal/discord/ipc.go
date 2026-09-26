@@ -67,13 +67,15 @@ type Conn struct {
 	version string
 }
 
-// initiates a connection with discords ipc, completes a handshake
-// and returns a pointer to a DiscordConn type to be used for calling the other funcs
-func NewConn(clientID, version string) (*Conn, error) {
+func DiscoverIPCSocket() (net.Conn, error) {
+	var (
+		conn net.Conn
+		err  error
+	)
+
 	// start with the xdg runtime dir and if not found for whatever reason use /tmp fallback
 	// technically there's other fallback var's (TMPDIR, TEMP, TMP) but they were all empty for me
-	// seems reasonable to skip straight to /tmp
-
+	// seems reasonable to skip straight to /tmp - was old me a narcissist ??
 	runtimeDir := os.Getenv("XDG_RUNTIME_DIR")
 	if runtimeDir == "" {
 		runtimeDir = "/tmp"
@@ -81,8 +83,6 @@ func NewConn(clientID, version string) (*Conn, error) {
 
 	// discord exposes sockets as discord-ipc-0..9, extra clients (flatpak, a
 	// second install) land on higher numbers so try each and take the first
-	var conn net.Conn
-	var err error
 	for i := range 10 {
 		socketPath := filepath.Join(runtimeDir, fmt.Sprintf("discord-ipc-%d", i))
 		conn, err = net.Dial("unix", socketPath)
@@ -92,6 +92,17 @@ func NewConn(clientID, version string) (*Conn, error) {
 	}
 	if conn == nil {
 		return nil, fmt.Errorf("could not connect to discord ipc: %w", err)
+	}
+
+	return conn, nil
+}
+
+// initiates a connection with discords ipc, completes a handshake
+// and returns a pointer to a DiscordConn type to be used for calling the other funcs
+func NewConn(clientID, version string) (*Conn, error) {
+	conn, err := DiscoverIPCSocket()
+	if err != nil {
+		return nil, err
 	}
 
 	dc := &Conn{conn: conn}
