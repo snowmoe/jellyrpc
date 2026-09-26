@@ -1,10 +1,15 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
+	"os/signal"
 	"strings"
+	"syscall"
+
+	"github.com/snowmoe/jellyrpc/internal/jellyfin"
 )
 
 type status int
@@ -38,9 +43,8 @@ type result struct {
 }
 
 func printResult(r result) {
-	fmt.Printf("%s: %s    %-16s\n",
-		r.status,
-		r.name,
+	fmt.Printf("%-24s %s\n",
+		fmt.Sprintf("%s: %s", r.status, r.name),
 		r.msg,
 	)
 }
@@ -49,33 +53,31 @@ var errCheckFailed = errors.New("check failed")
 
 // result helpers
 
-func fail(name, msg string) result {
+func fail(msg string) result {
 	return result{
-		name:   name,
 		status: statusFail,
 		msg:    msg,
 	}
 }
 
-func warn(name, msg string) result {
+func warn(msg string) result {
 	return result{
-		name:   name,
 		status: statusWarn,
 		msg:    msg,
 	}
 }
 
-func ok(name string) result {
+func ok(msg string) result {
 	return result{
-		name:   name,
 		status: statusOK,
+		msg:    msg,
 	}
 }
 
-func skip(name string) result {
+func skip(msg string) result {
 	return result{
-		name:   name,
 		status: statusSkip,
+		msg:    msg,
 	}
 }
 
@@ -91,7 +93,12 @@ func runCheck() error {
 		// anything past that, so we can skip based on this
 		chain = true
 
-		cfg *Config
+		cfg    *Config
+		client *jellyfin.Client
+		user   *jellyfin.User
+
+		ctx  context.Context
+		stop context.CancelFunc
 	)
 
 	// takes a result, prints it, sets failed
@@ -112,29 +119,31 @@ func runCheck() error {
 	// otherwise runs a check and reports it,
 	// setting chain to false if that failed
 	step := func(name string, fn func() result) {
+		var r result
 		// if chain == false, we skip
 		if !chain {
-			report(skip(name))
-			return
+			r = skip("earlier check failed")
+		} else {
+			// run the test func, if report returned false then
+			// the check failed and we set chain to false to skip
+			// future checks that step
+			r = fn()
 		}
 
-		// run the test func, if report returned false then
-		// the check failed and we set chain to false to skip
-		// future checks that step
-		if !report(fn()) {
+		r.name = name
+		if !report(r) {
 			chain = false
 		}
 	}
 
-	// checks
+	// config checks
 
 	cfgPath, err := GetConfigPath()
 	if err != nil {
-		// return this directly because there's literally no config file
+		// return this directly because somethings seriously fucked
+		// if we can't even build the config path
 		return err
 	}
-
-	// chain checks
 
 	step("config file", func() result {
 		r, c := checkConfigFile(cfgPath)
@@ -143,6 +152,26 @@ func runCheck() error {
 	})
 
 	step("config values", func() result { return checkConfigValues(cfg) })
+
+	// jf client checks
+
+	if chain {
+		client = jellyfin.NewClient(cfg.JellyfinURL, cfg.JellyfinKey, gitVersion)
+		client.UserName = cfg.JellyfinUser
+
+		ctx, stop = signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+		defer stop()
+	}
+
+	step("jellyfin server", func() result { return checkServer(ctx, client) })
+
+	step("user token", func() result {
+		r, u := checkToken(ctx, client)
+		user = u
+		return r
+	})
+
+	step("jellyfin user", func() result { return checkUser(ctx, client, user) })
 
 	// if any failed then return an error so we can exit 1 in main
 	if failed {
@@ -154,34 +183,98 @@ func runCheck() error {
 
 // check functions
 
-func checkConfigFile(path string) (result, *Config) {
-	name := "config file"
+// client
 
+// gets the public server info and reports jf server name and version
+// if this fails then in most cases there is no reachable jellyfin
+// server, unless there's reverse proxy rules or similar
+func checkServer(ctx context.Context, c *jellyfin.Client) result {
+	info, err := c.PublicSystemInfo(ctx)
+	if err != nil {
+		return fail(err.Error())
+	}
+
+	msg := fmt.Sprintf("%s (v%s)", info.ServerName, info.Version)
+	return ok(msg)
+}
+
+// attempts /Users/Me with the key, returning a pointer to user if it was a
+// user token otherwise skips if we get 400 from jellyfin (using an api key)
+func checkToken(ctx context.Context, c *jellyfin.Client) (result, *jellyfin.User) {
+	user, err := c.CurrentUser(ctx)
+	if statErr, ok := errors.AsType[*jellyfin.StatusError](err); ok {
+		switch statErr.Code {
+		case 400:
+			return skip("using api key"), nil
+		case 401:
+			return fail("token rejected"), nil
+		default:
+			return fail(err.Error()), nil
+		}
+	} else if err != nil {
+		return fail(err.Error()), nil
+	}
+
+	return ok("user: " + user.Name), &user
+}
+
+// attempts /Users with the key and verifies if the username in config
+// exists as a jellyfin user, if we're using a user token then we warn
+// on config name mismatch, otherwise skipping the check as we already know
+// the username from /Users/Me
+func checkUser(ctx context.Context, c *jellyfin.Client, user *jellyfin.User) result {
+	// nil user would mean we're using an api key
+	if user != nil {
+		if !strings.EqualFold(c.UserName, user.Name) {
+			msg := fmt.Sprintf("mismatched usernames (token: %s, config: %s)", user.Name, c.UserName)
+			return warn(msg)
+		}
+
+		return skip("using token")
+	}
+
+	users, err := c.Users(ctx)
+	// no need to check status, api keys are always privileged (afaik)
+	// so if this fails the key won't work full stop
+	if err != nil {
+		return fail(err.Error())
+	}
+
+	for _, u := range users {
+		if strings.EqualFold(u.Name, c.UserName) {
+			return ok(fmt.Sprintf("user '%s' exists", u.Name))
+		}
+	}
+
+	return fail(fmt.Sprintf("user '%s' doesn't exist", c.UserName))
+}
+
+// config
+
+func checkConfigFile(path string) (result, *Config) {
 	cfg, unknown, err := loadConfig(path)
 	if errors.Is(err, os.ErrNotExist) {
-		return fail(name, "config file doesn't exist, try 'jellyrpc setup'"), nil
+		return fail("config file doesn't exist, try 'jellyrpc setup'"), nil
 	} else if err != nil {
-		return fail(name, err.Error()), nil
+		return fail(err.Error()), nil
 	}
 
 	if len(unknown) > 0 {
 		msg := fmt.Sprintf("unknown config key(s): %s", strings.Join(unknown, ", "))
-		return warn(name, msg), cfg
+		return warn(msg), cfg
 	}
 
-	return ok(name), cfg
+	return ok(""), cfg
 }
 
 func checkConfigValues(cfg *Config) result {
-	name := "config values"
-
 	cfg.ApplyDefaults(defaultAppID)
 
 	missing, err := cfg.Validate()
 	if err != nil {
 		msg := fmt.Sprintf("%s: %s", err, strings.Join(missing, ", "))
-		return fail(name, msg)
+		return fail(msg)
 	}
 
-	return ok(name)
+	return ok("")
 }
