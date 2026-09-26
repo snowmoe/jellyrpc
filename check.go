@@ -173,6 +173,8 @@ func runCheck() error {
 
 	step("jellyfin user", func() result { return checkUser(ctx, client, user) })
 
+	step("active playing", func() result { return checkPlaying(ctx, client) })
+
 	// if any failed then return an error so we can exit 1 in main
 	if failed {
 		return errCheckFailed
@@ -247,6 +249,27 @@ func checkUser(ctx context.Context, c *jellyfin.Client, user *jellyfin.User) res
 	}
 
 	return fail(fmt.Sprintf("user '%s' doesn't exist", c.UserName))
+}
+
+func checkPlaying(ctx context.Context, c *jellyfin.Client) result {
+	var msg string
+
+	s, err := c.ActiveSession(ctx)
+	if err != nil {
+		return fail(err.Error())
+	}
+
+	if s.NowPlayingItem.Name == "" {
+		return ok("nothing playing")
+	}
+
+	if s.NowPlayingItem.SeriesName != "" {
+		msg = fmt.Sprintf("currently playing: %s", s.NowPlayingItem.SeriesName)
+	} else {
+		msg = fmt.Sprintf("currently playing: %s", s.NowPlayingItem.Name)
+	}
+
+	return ok(msg)
 }
 
 // config
