@@ -33,12 +33,21 @@ func parseBool(val string) bool {
 }
 
 func GetConfigPath() (string, error) {
+	configDir, err := GetConfigDir()
+	if err != nil {
+		return "", err
+	}
+
+	return filepath.Join(configDir, "config"), nil
+}
+
+func GetConfigDir() (string, error) {
 	configDir, err := os.UserConfigDir()
 	if err != nil {
 		return "", fmt.Errorf("unable to get config dir: %w", err)
 	}
 
-	return filepath.Join(configDir, "jellyrpc", "config"), nil
+	return filepath.Join(configDir, "jellyrpc"), nil
 }
 
 func (cfg *Config) ApplyDefaults(defaultAppID string) {
