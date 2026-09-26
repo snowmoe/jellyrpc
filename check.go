@@ -140,6 +140,7 @@ func runCheck() error {
 	}
 
 	// config checks
+	fmt.Println("CONFIG")
 
 	cfgPath, err := GetConfigPath()
 	if err != nil {
@@ -157,6 +158,7 @@ func runCheck() error {
 	step("config values", func() result { return checkConfigValues(cfg) })
 
 	// jf client checks
+	fmt.Println("\nJELLYFIN")
 
 	if chain {
 		client = jellyfin.NewClient(cfg.JellyfinURL, cfg.JellyfinKey, gitVersion)
@@ -166,7 +168,7 @@ func runCheck() error {
 		defer stop()
 	}
 
-	step("jellyfin server", func() result { return checkServer(ctx, client) })
+	step("server", func() result { return checkServer(ctx, client) })
 
 	step("user token", func() result {
 		r, u := checkToken(ctx, client)
@@ -174,11 +176,12 @@ func runCheck() error {
 		return r
 	})
 
-	step("jellyfin user", func() result { return checkUser(ctx, client, user) })
+	step("user", func() result { return checkUser(ctx, client, user) })
 
 	step("active playing", func() result { return checkPlaying(ctx, client) })
 
 	// discord checks
+	fmt.Println("\nDISCORD")
 
 	// we set chain back to true since discord checks aren't dependant on the
 	// jellyfin chain, but they do have their own chain (handshake can't run if socket)
