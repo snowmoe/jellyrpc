@@ -9,6 +9,7 @@ import (
 	"strings"
 	"syscall"
 
+	"github.com/snowmoe/jellyrpc/internal/discord"
 	"github.com/snowmoe/jellyrpc/internal/jellyfin"
 )
 
@@ -99,6 +100,8 @@ func runCheck() error {
 
 		ctx  context.Context
 		stop context.CancelFunc
+
+		appID string
 	)
 
 	// takes a result, prints it, sets failed
@@ -174,6 +177,23 @@ func runCheck() error {
 	step("jellyfin user", func() result { return checkUser(ctx, client, user) })
 
 	step("active playing", func() result { return checkPlaying(ctx, client) })
+
+	// discord checks
+
+	// we set chain back to true since discord checks aren't dependant on the
+	// jellyfin chain, but they do have their own chain (handshake can't run if socket)
+	// discovery failed
+	chain = true
+
+	step("socket", func() result { return checkSocket() })
+
+	if cfg == nil {
+		appID = defaultAppID
+	} else {
+		appID = cfg.AppID
+	}
+
+	step("rpc handshake", func() result { return checkHandshake(appID) })
 
 	// if any failed then return an error so we can exit 1 in main
 	if failed {
@@ -269,6 +289,36 @@ func checkPlaying(ctx context.Context, c *jellyfin.Client) result {
 		msg = fmt.Sprintf("currently playing: %s", s.NowPlayingItem.Name)
 	}
 
+	return ok(msg)
+}
+
+// discord
+
+func checkSocket() result {
+	conn, err := discord.DiscoverIPCSocket()
+	if err != nil {
+		return fail("discord not running?")
+	}
+
+	conn.Close()
+	return ok("found discord socket")
+}
+
+func checkHandshake(appID string) result {
+	var msg string
+
+	dc, err := discord.NewConn(appID, gitVersion)
+	if err != nil {
+		return fail(err.Error())
+	}
+
+	dc.Close()
+
+	if appID == defaultAppID {
+		msg = "handshake successful (default app id)"
+	} else {
+		msg = "handshake successful"
+	}
 	return ok(msg)
 }
 
