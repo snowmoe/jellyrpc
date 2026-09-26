@@ -22,7 +22,7 @@ func (c *Client) InitiateQC(ctx context.Context) (QuickConnect, error) {
 
 	err := c.do(ctx, "POST", "/QuickConnect/Initiate", nil, &qc)
 	if err != nil {
-		return QuickConnect{}, nil
+		return QuickConnect{}, err
 	}
 
 	return qc, nil
