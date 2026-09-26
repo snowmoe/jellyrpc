@@ -35,7 +35,7 @@ func main() {
 	case "run":
 		err = run()
 	case "setup":
-		err = fmt.Errorf("%s: not implemented yet", subCmd)
+		err = runSetup()
 	case "check":
 		err = runCheck()
 	case "version", "-v", "--version":
