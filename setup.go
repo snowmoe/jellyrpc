@@ -6,8 +6,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"os"
 	"os/signal"
+	"slices"
 	"strings"
 	"syscall"
 	"time"
@@ -88,6 +90,62 @@ func runSetup() error {
 	}
 
 	return nil
+}
+
+// takes a source config, and a map of new values, updates any
+// existing lines with the new values, and appending anything new
+func updateConfig(src string, values map[string]string) string {
+	var b strings.Builder
+	doneKeys := make(map[string]bool)
+
+	// scan through lines, leaving anything we don't need
+	// to update written straight back as is,
+	// updating any lines that we need to update
+	for line := range strings.Lines(src) {
+		trimmed := strings.TrimSpace(line)
+
+		if trimmed == "" || strings.HasPrefix(trimmed, "#") {
+			b.WriteString(line)
+			continue
+		}
+
+		parts := strings.SplitN(trimmed, "=", 2)
+		if len(parts) != 2 {
+			b.WriteString(line)
+			continue
+		}
+
+		key := strings.TrimSpace(parts[0])
+
+		val, ok := values[key]
+		if ok {
+			updatedLine := fmt.Sprintf("%s=%s\n", key, val)
+			b.WriteString(updatedLine)
+
+			doneKeys[key] = true
+		} else {
+			b.WriteString(line)
+		}
+	}
+
+	// if there's no trailing newline then write it otherwise
+	// it fucks the appended writes
+	if b.Len() > 0 && !strings.HasSuffix(b.String(), "\n") {
+		b.WriteString("\n")
+	}
+
+	// append any missing lines
+	for _, key := range slices.Sorted(maps.Keys(values)) {
+		done := doneKeys[key]
+		if done {
+			continue
+		}
+
+		newLine := fmt.Sprintf("%s=%s\n", key, values[key])
+		b.WriteString(newLine)
+	}
+
+	return b.String()
 }
 
 func waitForQC(ctx context.Context, c *jellyfin.Client, interval time.Duration, secret string) error {
