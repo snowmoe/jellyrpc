@@ -3,7 +3,7 @@ package jellyfin
 import "context"
 
 // CurrentUser returns the token's user.
-// api keys aren't tied to a user so jellfin returns 400
+// api keys aren't tied to a user so jellfin will return 400
 func (c *Client) CurrentUser(ctx context.Context) (User, error) {
 	var user User
 
@@ -15,7 +15,7 @@ func (c *Client) CurrentUser(ctx context.Context) (User, error) {
 	return user, nil
 }
 
-// returns a slice of User types, will fail if token has no admin perms
+// Users returns a slice of User types, will fail if token has no admin perms
 func (c *Client) Users(ctx context.Context) ([]User, error) {
 	var users []User
 

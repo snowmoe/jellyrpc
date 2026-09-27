@@ -6,10 +6,12 @@ import (
 	"strings"
 )
 
-// determines if the jellyfin instance url provided is local
-// checks if localhost or a .local domain
+// IsLocalInstance tries to determine if url provided is local
+//
+// checks if localhost or a .local domain, and
 // checks if ip (if parseable) is rfc1918 or loopback
-// still kept 127 and ::1 in the host check anyway but can possibly be removed
+//
+// still kept 127 and ::1 in the host check anyway but can probably be removed
 func IsLocalInstance(hostURL string) bool {
 	u, err := url.Parse(hostURL)
 	if err != nil {
@@ -30,7 +32,7 @@ func IsLocalInstance(hostURL string) bool {
 	return false
 }
 
-// cleans url's AND guesses protocol if it's missing (which isn't an issue if U READ DA README UGH)
+// SanitiseURL cleans a url AND guesses the protocol if it's missing
 func SanitiseURL(rawURL string) string {
 	u := strings.TrimSpace(rawURL)
 	if u == "" {
