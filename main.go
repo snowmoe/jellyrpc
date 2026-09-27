@@ -2,13 +2,14 @@ package main
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"os"
 	"os/signal"
-	"path/filepath"
-	"strings"
 	"syscall"
+	"time"
+
+	"github.com/snowmoe/jellyrpc/internal/discord"
+	"github.com/snowmoe/jellyrpc/internal/jellyfin"
 )
 
 const defaultAppID = "1517892834907394229"
@@ -19,42 +20,111 @@ var (
 )
 
 func main() {
-	if err := run(); err != nil {
-		Fatal("%v", err)
+	var (
+		err    error
+		subCmd string
+	)
+
+	if len(os.Args) <= 1 {
+		subCmd = "run"
+	} else {
+		subCmd = os.Args[1]
+	}
+
+	switch subCmd {
+	case "run":
+		err = run()
+	case "setup":
+		err = runSetup()
+	case "check":
+		err = runCheck()
+	case "version", "-v", "--version":
+		fmt.Println(version())
+	case "help", "-h", "--help":
+		printHelp()
+	default:
+		fmt.Fprintf(os.Stderr, "jellyrpc: unknown command: %s\n  run 'jellyrpc help' for a full list of commands\n", subCmd)
+		os.Exit(2)
+	}
+
+	if err != nil {
+		if subCmd == "run" {
+			Fatal("%v", err)
+		}
+
+		Die("%v", err)
+	}
+}
+
+func version() string {
+	if gitVersion != "dev" {
+		return fmt.Sprintf("jellyrpc %s", gitVersion)
+	} else if gitHash != "dev" {
+		return fmt.Sprintf("jellyrpc dev build: commit %s", gitHash)
+	} else {
+		return "jellyrpc dev build"
+	}
+}
+
+func printHelp() {
+	fmt.Print(`simple jellyfin discord rpc daemon.
+
+USAGE
+  jellyrpc <subcommand>
+
+SUBCOMMANDS
+  run      start the daemon (default)
+  setup    run the setup wizard
+  check    test the config and jellyfin connection
+  version  print jellyrpc build version or hash
+  help     show this message
+`)
+}
+
+func waitForConfig(ctx context.Context, cfgPath string, interval time.Duration) (*Config, error) {
+	var lastMsg string
+
+	for {
+		cfg, err := loadValidConfig(cfgPath)
+		if err == nil {
+			return cfg, nil
+		}
+
+		msg := err.Error()
+		if msg != lastMsg {
+			Warn("waiting for valid config: %v", err)
+			lastMsg = msg
+		}
+
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(interval):
+		}
 	}
 }
 
 func run() error {
 	Info("starting jellyfin rpc daemon")
-	if gitVersion != "dev" {
-		Info("running jellyrpc %s", gitVersion)
-	} else if gitHash != "dev" {
-		Info("running jellyrpc from commit: %s", gitHash)
-	} else {
-		Info("running dev build")
-	}
+	Info("running %s", version())
 
-	configDir, err := os.UserConfigDir()
+	cfgPath, err := configPath()
 	if err != nil {
 		return err
 	}
 
-	cfgPath := filepath.Join(configDir, "jellyrpc", "config")
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
 
-	cfg, err := LoadConfig(cfgPath)
-	if errors.Is(err, os.ErrNotExist) {
-		return errors.New("couldn't find config file, does it exist?")
-	} else if err != nil {
+	cfg, err := waitForConfig(ctx, cfgPath, 3*time.Second)
+	if err != nil {
+		if ctx.Err() != nil {
+			// return nil because we were told to stop
+			return nil
+		}
 		return err
 	}
-
-	cfg.ApplyDefaults(defaultAppID)
-
-	err, missing := cfg.Validate()
-	if err != nil {
-		return fmt.Errorf("%w: %s", err, strings.Join(missing, ", "))
-	}
-	Info("loaded config file")
+	Info("config file loaded")
 
 	if cfg.AppID != defaultAppID {
 		Info("using custom discord app id: %s", cfg.AppID)
@@ -64,16 +134,16 @@ func run() error {
 		Info("preferring episode art instead of series")
 	}
 
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
+	client := jellyfin.NewClient(cfg.JellyfinURL, cfg.JellyfinKey, gitVersion)
+	client.UserName = cfg.JellyfinUser
 
 	app := &App{
 		Config:   cfg,
-		Sessions: NewJellyfinClient(cfg),
+		Sessions: client,
 		Connect: func(clientID string) (PresenceClient, error) {
-			return NewDiscordConn(clientID)
+			return discord.NewConn(clientID, gitVersion)
 		},
 	}
 
-	return app.Run(ctx)
+	return app.run(ctx)
 }

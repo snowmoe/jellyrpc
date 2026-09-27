@@ -3,13 +3,15 @@ package main
 import (
 	"bufio"
 	"errors"
+	"fmt"
+	"io"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
-)
 
-// simple config thingy
-// since I wanted no deps I just split key and val with =, trim spaces, and pray
+	"github.com/snowmoe/jellyrpc/internal/jellyfin"
+)
 
 type Config struct {
 	JellyfinURL   string
@@ -31,7 +33,25 @@ func parseBool(val string) bool {
 	return false
 }
 
-func (cfg *Config) ApplyDefaults(defaultAppID string) {
+func configPath() (string, error) {
+	configDir, err := configDir()
+	if err != nil {
+		return "", err
+	}
+
+	return filepath.Join(configDir, "config"), nil
+}
+
+func configDir() (string, error) {
+	configDir, err := os.UserConfigDir()
+	if err != nil {
+		return "", fmt.Errorf("unable to get config dir: %w", err)
+	}
+
+	return filepath.Join(configDir, "jellyrpc"), nil
+}
+
+func (cfg *Config) applyDefaults(defaultAppID string) {
 	if cfg.PollRate <= 0 {
 		cfg.PollRate = 5
 	}
@@ -45,7 +65,7 @@ func (cfg *Config) ApplyDefaults(defaultAppID string) {
 	}
 }
 
-func (cfg *Config) Validate() (error, []string) {
+func (cfg *Config) validate() ([]string, error) {
 	var missing []string
 
 	// check all explicity so we can present ALL missing values
@@ -62,23 +82,54 @@ func (cfg *Config) Validate() (error, []string) {
 	}
 
 	if len(missing) > 0 {
-		return errors.New("config file missing required values"), missing
+		return missing, errors.New("config file missing required values")
 	}
 
-	return nil, missing
+	return nil, nil
 }
 
-func LoadConfig(path string) (*Config, error) {
-	file, err := os.Open(path)
-	if err != nil {
+func loadValidConfig(cfgPath string) (*Config, error) {
+	cfg, unknown, err := loadConfig(cfgPath)
+	if errors.Is(err, os.ErrNotExist) {
+		// TODO prompt to run "jellyrpc setup" as a fix?
+		return nil, fmt.Errorf("file doesn't exist: %s", cfgPath)
+	} else if err != nil {
+		// TODO catch other error types explicity, e.g. perm issues
 		return nil, err
 	}
+
+	if len(unknown) > 0 {
+		Warn("unknown config key(s): %s", strings.Join(unknown, ", "))
+	}
+
+	cfg.applyDefaults(defaultAppID)
+
+	missing, err := cfg.validate()
+	if err != nil {
+		return nil, fmt.Errorf("%w: %s", err, strings.Join(missing, ", "))
+	}
+
+	return cfg, nil
+}
+
+func loadConfig(path string) (*Config, []string, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return nil, nil, err
+	}
 	defer file.Close()
+
+	return parseConfig(file)
+}
+
+// TODO move the unknown keys into a custom config error type
+func parseConfig(r io.Reader) (*Config, []string, error) {
+	var unknown []string
 
 	// -1 marks pause timeout as unset so ApplyDefaults can tell it apart from
 	// an explicit 0 which disables the timeout
 	cfg := &Config{PauseTimeout: -1}
-	scanner := bufio.NewScanner(file)
+	scanner := bufio.NewScanner(r)
 
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
@@ -97,7 +148,7 @@ func LoadConfig(path string) (*Config, error) {
 
 		switch key {
 		case "JELLYFIN_URL":
-			cfg.JellyfinURL = SanitiseURL(val)
+			cfg.JellyfinURL = jellyfin.SanitiseURL(val)
 		case "JELLYFIN_KEY":
 			cfg.JellyfinKey = val
 		case "JELLYFIN_USER":
@@ -123,14 +174,14 @@ func LoadConfig(path string) (*Config, error) {
 		case "USE_EPISODE_ART":
 			cfg.UseEpisodeArt = parseBool(val)
 		default:
-			Warn("unknown config key: %s", key)
+			unknown = append(unknown, key)
 		}
 	}
 
-	err = scanner.Err()
+	err := scanner.Err()
 	if err != nil {
-		return nil, err
+		return nil, unknown, err
 	}
 
-	return cfg, nil
+	return cfg, unknown, nil
 }

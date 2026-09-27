@@ -23,11 +23,14 @@ install: build
 	mkdir -p $(HOME)/.config/jellyrpc
 	cp --update=none config.example $(HOME)/.config/jellyrpc/config
 
+	@echo "setting config dir/file perms"
+	chmod 700 $(HOME)/.config/jellyrpc
+	chmod 600 $(HOME)/.config/jellyrpc/config
+
 	@echo "reloading systemd user daemon"
 	systemctl --user daemon-reload
 
-	@echo "setup complete, run 'systemctl --user enable --now $(BINARY_NAME)' to start."
-	@echo "or 'systemctl --user restart $(BINARY_NAME)' to update the daemon."
+	@echo "install complete, run '$(BINARY_NAME) setup' to configure $(BINARY_NAME)"
 
 uninstall:
 	@echo "stopping and disabling services"

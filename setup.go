@@ -1,0 +1,611 @@
+package main
+
+import (
+	"bufio"
+	"bytes"
+	"context"
+	_ "embed"
+	"errors"
+	"fmt"
+	"io"
+	"io/fs"
+	"maps"
+	"os"
+	"os/exec"
+	"os/signal"
+	"path/filepath"
+	"slices"
+	"strings"
+	"syscall"
+	"time"
+
+	"github.com/snowmoe/jellyrpc/internal/jellyfin"
+)
+
+type Prompt struct {
+	in  *bufio.Reader
+	out io.Writer
+}
+
+// returns a *Prompt, which wraps the in/out io Reader/Writer
+func NewPrompt(in io.Reader, out io.Writer) *Prompt {
+	return &Prompt{
+		in:  bufio.NewReader(in),
+		out: out,
+	}
+}
+
+//go:embed config.example
+var exampleCfg string
+
+func runSetup() error {
+	uid := os.Geteuid()
+	if uid == 0 {
+		return errors.New("running as root, try again as a user")
+	}
+
+	cfgPath, err := configPath()
+	if err != nil {
+		return err
+	}
+
+	baseCfg, jellyfinURL, err := configSource(cfgPath)
+	if err != nil {
+		return err
+	}
+
+	// display banner now to avoid displaying before basic failable steps
+	displayBanner()
+
+	p := NewPrompt(os.Stdin, os.Stdout)
+	ctx := context.Background()
+
+	c, err := askServer(ctx, p, jellyfinURL)
+	if err != nil {
+		return err
+	}
+
+	// setup authentication (qc or api key)
+	err = authenticate(ctx, p, c)
+	if err != nil {
+		return err
+	}
+
+	// update/create the config with the new auth, and save
+	err = saveConfig(cfgPath, baseCfg, c)
+	if err != nil {
+		return err
+	}
+
+	fmt.Fprintf(p.out, "wrote new config to %s\n", cfgPath)
+
+	if isSystemd() {
+		err := offerService(p)
+		if err != nil {
+			return err
+		}
+	}
+
+	fmt.Fprint(p.out, "\nrunning checks...\n\n")
+
+	err = runCheck()
+	if err != nil {
+		return err
+	}
+
+	fmt.Fprintf(p.out, `
+jellyrpc setup complete
+
+  server : %s
+  user   : %s
+
+`, c.BaseURL, c.UserName)
+
+	return nil
+}
+
+// offerService offers to enable and (re)start the systemd unit if installed
+//
+// unlike fan service this starts the jellyrpc daemon
+func offerService(p *Prompt) error {
+	if !hasSystemctl() {
+		// you have systemd, you don't have systemctl in PATH, nice
+		fmt.Fprintln(p.out, "start jellyrpc manually: jellyrpc run")
+		return nil
+	}
+
+	// if the service isnt installed don't even offer
+	if !isServiceInstalled() {
+		fmt.Fprintln(p.out, "systemd unit not installed, double check install instructions")
+		return nil
+	}
+
+	ok, err := p.Bool("enable and start jellyrpc service?", true)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return nil
+	}
+
+	out, err := systemctl("enable", "jellyrpc.service")
+	if err != nil {
+		fmt.Fprintf(p.out, "\n\nerror enabling the systemd service:\n\n%s", out)
+		return fmt.Errorf("enabled service: %w", err)
+	}
+
+	fmt.Fprintln(p.out, "enabled jellyrpc service")
+
+	out, err = systemctl("restart", "jellyrpc.service")
+	if err != nil {
+		fmt.Fprintf(p.out, "\n\nerror restarting the systemd service:\n\n%s", out)
+		return fmt.Errorf("restart service: %w", err)
+	}
+
+	fmt.Fprintln(p.out, "started jellyrpc service")
+
+	return nil
+}
+
+// wraps exec.Command, runs: systemctl --user args...
+func systemctl(args ...string) ([]byte, error) {
+	args = append([]string{"--user"}, args...)
+	return exec.Command("systemctl", args...).CombinedOutput()
+}
+
+// isServiceInstalled checks if the jellyrpc.service unit has been installed
+func isServiceInstalled() bool {
+	_, err := systemctl("cat", "jellyrpc.service")
+	return err == nil
+}
+
+// hasSystemctl checks if systemctl is in PATH
+func hasSystemctl() bool {
+	_, err := exec.LookPath("systemctl")
+	return err == nil
+}
+
+// isSystemd determines if systemd is the init system by
+// checking if /run/systemd/system exists
+func isSystemd() bool {
+	_, err := os.Stat("/run/systemd/system")
+	return err == nil
+}
+
+// authenticate checks if quick connect is enabled, and prompts to setup
+// quick connect or setup with an api key. then setting the new key + username
+// in the jellyfin.Client provided
+func authenticate(ctx context.Context, p *Prompt, c *jellyfin.Client) error {
+	var (
+		useQC bool
+		name  string
+		token string
+	)
+
+	// check if quick connect is enabled
+	hasQC, err := c.QuickConnectEnabled(ctx)
+	if err != nil {
+		return err
+	}
+
+	if hasQC {
+		useQC, err = p.BoolWithChars("use (Q)uick Connect or paste a (k)ey?", true, "q", "k")
+		if err != nil {
+			return err
+		}
+	}
+
+	if useQC {
+		name, token, err = askQuickConnect(ctx, p, c)
+	} else {
+		name, token, err = askKey(ctx, p, c)
+	}
+
+	if err != nil {
+		return err
+	}
+
+	// set the client key and name, the url is already set from askServer
+	c.UserName, c.APIKey = name, token
+
+	fmt.Fprintf(p.out, "authentication successful for user: %s\n", name)
+
+	return nil
+}
+
+// askKey prompts for an api key or user token, if it is a user token it
+// returns the token owner's username and the key, if it's an api key
+// it calls askUserName before returning the username and key
+func askKey(ctx context.Context, p *Prompt, c *jellyfin.Client) (userName, key string, err error) {
+	for {
+		key, err = p.String("api key or token", "")
+		if err != nil {
+			return "", "", err
+		}
+
+		c.APIKey = key
+
+		// if usertoken then return username and key
+		user, err := c.CurrentUser(ctx)
+		if err == nil {
+			return user.Name, key, nil
+		}
+
+		statErr, ok := errors.AsType[*jellyfin.StatusError](err)
+		switch {
+		case !ok:
+			return "", "", err
+		case statErr.Code == 401:
+			fmt.Fprintln(p.out, "\nkey or token was rejected")
+			continue
+		case statErr.Code != 400:
+			return "", "", err
+		}
+
+		// we got a status 400 back from jellyfin meaning it's an
+		// api key, which isn't tied to a user(name), so we prompt for that
+
+		userName, err = askUserName(ctx, p, c)
+		if err != nil {
+			return "", "", err
+		}
+
+		return userName, key, nil
+	}
+}
+
+// askUserName gets all the jellyfin users, prompts for a username
+// and checks if that user exists in jellyfin
+func askUserName(ctx context.Context, p *Prompt, c *jellyfin.Client) (string, error) {
+	fmt.Fprintln(p.out, "\nenter the jellyfin user to use the status of")
+
+	users, err := c.Users(ctx)
+	if err != nil {
+		return "", err
+	}
+
+	for {
+		userName, err := p.String("username", "")
+		if err != nil {
+			return "", err
+		}
+
+		for _, u := range users {
+			if strings.EqualFold(u.Name, userName) {
+				return u.Name, nil
+			}
+		}
+
+		fmt.Fprintf(p.out, "user %q doesn't exist\n\n", userName)
+	}
+}
+
+// waitForQC polls /QuickConnect/Connect to check if the quick connect code
+// has been entered
+func waitForQC(ctx context.Context, c *jellyfin.Client, interval time.Duration, secret string) error {
+	pollCtx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	for {
+		ok, err := c.ConnectQC(pollCtx, secret)
+		if err != nil {
+			return err
+		}
+
+		if ok {
+			return nil
+		}
+
+		select {
+		case <-pollCtx.Done():
+			return pollCtx.Err()
+		case <-time.After(interval):
+		}
+	}
+}
+
+// askQuickConnect prompts the user to setup quick connect, inititing the qc setup,
+// displaying the code and polling until entered with a 3 min expiry, then
+// authenticates with the qc secret. returning the username, token, and an error
+func askQuickConnect(ctx context.Context, p *Prompt, c *jellyfin.Client) (string, string, error) {
+	qc, err := c.InitiateQC(ctx)
+	if err != nil {
+		return "", "", err
+	}
+
+	fmt.Fprintf(p.out, `
+enter code in jellyfin under profile > Quick Connect
+
+  Quick Connect code: %s
+
+`, qc.Code)
+	fmt.Fprintf(p.out, "waiting (3 mins) for Quick Connect code to be entered... ")
+
+	qcCtx, stop := context.WithTimeout(ctx, 3*time.Minute)
+	defer stop()
+
+	err = waitForQC(qcCtx, c, 3*time.Second, qc.Secret)
+	// get this out of the way to avoid things writing on the waiting line
+	if err != nil {
+		fmt.Fprintln(p.out)
+	}
+
+	// then actually handle da errors
+	if errors.Is(err, context.Canceled) {
+		return "", "", errors.New("Quick Connect setup cancelled")
+	} else if errors.Is(err, context.DeadlineExceeded) {
+		return "", "", errors.New("code expired, run setup again")
+	} else if err != nil {
+		return "", "", err
+	}
+
+	auth, err := c.AuthenticateQC(ctx, qc.Secret)
+	if err != nil {
+		fmt.Fprintln(p.out)
+		return "", "", err
+	}
+
+	fmt.Fprintln(p.out, "success!")
+
+	return auth.User.Name, auth.Token, nil
+}
+
+// askServer asks for the jellyfin server url and tests it, prompting until confirmed.
+// can take a default url to prompt as the initial default.
+func askServer(ctx context.Context, p *Prompt, def string) (*jellyfin.Client, error) {
+	for {
+		// this will loop itself for required if url is empty
+		jellyfinURL, err := p.String("jellyfin server url", def)
+		if err != nil {
+			return nil, err
+		}
+
+		def = jellyfin.SanitiseURL(jellyfinURL)
+
+		c := jellyfin.NewClient(def, "", gitVersion)
+
+		info, err := c.PublicSystemInfo(ctx)
+		if err == nil {
+			fmt.Fprintf(p.out, "using %s (%s)\n\n", def, info.ServerName)
+			return c, nil
+		}
+
+		fmt.Fprintf(p.out, "can't reach server: %s\n\n", err.Error())
+	}
+}
+
+// saveConfig updates/fills JELLYFIN_URL, JELLYFIN_USER, and JELLYFIN_KEY from
+// the provided jellyfin.Client into the provided source.
+// then atomically writes the new config to the path provided
+func saveConfig(path, src string, c *jellyfin.Client) error {
+	// if we got this far we can just overwrite the url anyway, and if
+	// anything it'll be cleaner, as it's sanitised already
+	newValues := map[string]string{
+		"JELLYFIN_URL":  c.BaseURL,
+		"JELLYFIN_USER": c.UserName,
+		"JELLYFIN_KEY":  c.APIKey,
+	}
+
+	// src being either the example, or an existing one we loaded
+	newCfg := updateConfig(src, newValues)
+
+	cfgDir := filepath.Dir(path)
+
+	err := os.MkdirAll(cfgDir, 0o700)
+	if err != nil {
+		return err
+	}
+
+	return writeFileAtomic(path, []byte(newCfg))
+}
+
+// writeFileAtomic atomically writes data into the file path provided,
+// creating a temp file beside the file path, before renaming over top.
+func writeFileAtomic(path string, data []byte) error {
+	dir := filepath.Dir(path)
+
+	tmp, err := os.CreateTemp(dir, ".config-*.tmp")
+	if err != nil {
+		return err
+	}
+	defer tmp.Close()
+
+	tmpPath := tmp.Name()
+	// doesn't matter if this errors since it's just a best effort
+	// of cleaning up if anything goes wrong
+	defer os.Remove(tmpPath)
+
+	_, err = tmp.Write(data)
+	if err != nil {
+		return err
+	}
+
+	// sync and close explicity
+	err = tmp.Sync()
+	if err != nil {
+		return err
+	}
+	err = tmp.Close()
+	if err != nil {
+		return err
+	}
+
+	err = os.Rename(tmpPath, path)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// updateConfig takes a source config, and a map of new values, updates any
+// existing lines with the new values, and appending anything new
+func updateConfig(src string, values map[string]string) string {
+	var b strings.Builder
+	doneKeys := make(map[string]bool)
+
+	// scan through lines, leaving anything we don't need
+	// to update written straight back as is,
+	// updating any lines that we need to update
+	for line := range strings.Lines(src) {
+		trimmed := strings.TrimSpace(line)
+
+		if trimmed == "" || strings.HasPrefix(trimmed, "#") {
+			b.WriteString(line)
+			continue
+		}
+
+		parts := strings.SplitN(trimmed, "=", 2)
+		if len(parts) != 2 {
+			b.WriteString(line)
+			continue
+		}
+
+		key := strings.TrimSpace(parts[0])
+
+		val, ok := values[key]
+		if ok {
+			updatedLine := fmt.Sprintf("%s=%s\n", key, val)
+			b.WriteString(updatedLine)
+
+			doneKeys[key] = true
+		} else {
+			b.WriteString(line)
+		}
+	}
+
+	// if there's no trailing newline then write it otherwise
+	// it fucks the appended writes
+	if b.Len() > 0 && !strings.HasSuffix(b.String(), "\n") {
+		b.WriteString("\n")
+	}
+
+	// append any missing lines
+	for _, key := range slices.Sorted(maps.Keys(values)) {
+		done := doneKeys[key]
+		if done {
+			continue
+		}
+
+		newLine := fmt.Sprintf("%s=%s\n", key, values[key])
+		b.WriteString(newLine)
+	}
+
+	return b.String()
+}
+
+// configSource takes a config path and returns it's contents (if it exists),
+// the url (if parseable), and an error. if no config file exists it returns
+// the example config and an empty url
+func configSource(path string) (src, url string, err error) {
+	// attempt to read an existing config file
+	existing, err := os.ReadFile(path)
+	switch {
+	case err == nil:
+		// if it exists we attempt to parse it
+		cfg, _, err := parseConfig(bytes.NewReader(existing))
+		if err == nil {
+			// if we parsed okay then set the url from the config
+			url = cfg.JellyfinURL
+		}
+
+		src = string(existing)
+	case errors.Is(err, fs.ErrNotExist):
+		// use the example config as src
+		src = exampleCfg
+	default:
+		return "", "", err
+	}
+
+	return src, url, nil
+}
+
+func (p *Prompt) input(prompt string) (string, error) {
+	fmt.Fprint(p.out, prompt)
+
+	s, err := p.in.ReadString('\n')
+	if err != nil {
+		fmt.Fprintln(p.out)
+	}
+
+	// if we got an EOF but there was something typed before it
+	if err == io.EOF && s != "" {
+		return strings.TrimSpace(s), nil
+	} else if err != nil {
+		return "", fmt.Errorf("input cancelled: %w", err)
+	}
+
+	return strings.TrimSpace(s), nil
+}
+
+// String prompts for a string input with a default, if the default value
+// is an empty string the input will become required and loop until a value is taken
+func (p *Prompt) String(prompt, def string) (string, error) {
+	defStr := fmt.Sprintf(" [%s]", def)
+	// no def = required
+	if def == "" {
+		defStr = " (required)"
+	}
+
+	for {
+		s, err := p.input(fmt.Sprintf("%s%s: ", prompt, defStr))
+		if err != nil {
+			return "", err
+		}
+
+		if s != "" {
+			return s, nil
+		} else if def != "" {
+			return def, nil
+		}
+
+		fmt.Fprintf(p.out, "%s cannot be empty\n", prompt)
+	}
+}
+
+// Bool wraps BoolWithChars with "y" and "n", produces y/N and Y/n depending
+// on the default
+func (p *Prompt) Bool(prompt string, def bool) (bool, error) {
+	return p.BoolWithChars(prompt, def, "y", "n")
+}
+
+// BoolWithChars accepts 2 arbitrary strings to use as a boolean input.
+// along with a prompt and default value.
+func (p *Prompt) BoolWithChars(prompt string, def bool, trueChar, falseChar string) (bool, error) {
+	t := strings.ToLower(trueChar)
+	f := strings.ToLower(falseChar)
+
+	defStr := fmt.Sprintf("%s/%s", t, strings.ToUpper(f))
+	if def {
+		defStr = fmt.Sprintf("%s/%s", strings.ToUpper(t), f)
+	}
+
+	for {
+		s, err := p.input(fmt.Sprintf("%s [%s] ", prompt, defStr))
+		if err != nil {
+			return false, err
+		}
+
+		switch strings.ToLower(s) {
+		case "":
+			return def, nil
+		case t:
+			return true, nil
+		case f:
+			return false, nil
+		default:
+			fmt.Fprintf(p.out, "enter %s or %s\n", t, f)
+		}
+	}
+}
+
+// for future
+func displayBanner() {
+	fmt.Printf(`
+       (_)__ / / /_ _________  ____
+      / / -_) / / // / __/ _ \/ __/
+   __/ /\__/_/_/\_, /_/ / .__/\__/ 
+  |___/        /___/   /_/         %s
+
+`, gitVersion)
+}

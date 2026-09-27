@@ -3,10 +3,13 @@ package main
 import (
 	"context"
 	"time"
+
+	"github.com/snowmoe/jellyrpc/internal/jellyfin"
+	"github.com/snowmoe/jellyrpc/internal/presence"
 )
 
 type SessionProvider interface {
-	GetActiveSession(ctx context.Context) (*Session, error)
+	ActiveSession(ctx context.Context) (*jellyfin.Session, error)
 }
 
 type PresenceClient interface {
@@ -42,7 +45,7 @@ type App struct {
 	discordDown bool // whether the last discord connect failed, gates repeat warns
 }
 
-func (a *App) Run(ctx context.Context) error {
+func (a *App) run(ctx context.Context) error {
 	newTicker := a.NewTicker
 	if newTicker == nil {
 		newTicker = func(d time.Duration) Ticker {
@@ -80,7 +83,7 @@ func (a *App) Run(ctx context.Context) error {
 // poll runs a single tick, transient errors are logged and swallowed so the
 // daemon keeps running across jellyfin/discord/network blips instead of dying
 func (a *App) poll(ctx context.Context, dc *PresenceClient, now func() time.Time) {
-	sess, err := a.Sessions.GetActiveSession(ctx)
+	sess, err := a.Sessions.ActiveSession(ctx)
 	if err != nil {
 		// warn once on the way down, stay quiet until it recovers
 		if !a.sessionDown {
@@ -106,7 +109,7 @@ func (a *App) poll(ctx context.Context, dc *PresenceClient, now func() time.Time
 
 	// a new item restarts the pause window so a freshly opened but paused
 	// item still gets shown and its own idle timeout
-	if sess.NowPlayingItem.Id != a.lastPlaying {
+	if sess.NowPlayingItem.ID != a.lastPlaying {
 		a.pausedSince = time.Time{}
 	}
 
@@ -142,28 +145,36 @@ func (a *App) poll(ctx context.Context, dc *PresenceClient, now func() time.Time
 		*dc = conn
 	}
 
-	presence := BuildPresence(a.Config, sess, now().UnixMilli())
+	p := presence.Build(
+		presence.Options{
+			JellyfinURL:   a.Config.JellyfinURL,
+			UseEpisodeArt: a.Config.UseEpisodeArt,
+			UseDBLink:     a.Config.UseDBLink,
+		},
+		sess,
+		now().UnixMilli(),
+	)
 
-	if a.lastPlaying != sess.NowPlayingItem.Id {
-		a.lastPlaying = sess.NowPlayingItem.Id
-		Info("active playing: %s, id: %s", sess.NowPlayingItem.Name, sess.NowPlayingItem.Id)
+	if a.lastPlaying != sess.NowPlayingItem.ID {
+		a.lastPlaying = sess.NowPlayingItem.ID
+		Info("active playing: %s, id: %s", sess.NowPlayingItem.Name, sess.NowPlayingItem.ID)
 
-		if a.Config.UseDBLink && presence.TitleURL == "" {
+		if a.Config.UseDBLink && p.TitleURL == "" {
 			Warn("unable to find db link for active media")
 		}
 	}
 
 	var setErr error
-	if presence.Paused {
-		setErr = (*dc).SetPaused(presence.Title, presence.TitleURL, presence.ArtworkURL)
+	if p.Paused {
+		setErr = (*dc).SetPaused(p.Title, p.TitleURL, p.ArtworkURL)
 	} else {
 		setErr = (*dc).SetWatching(
-			presence.Title,
-			presence.State,
-			presence.TitleURL,
-			presence.ArtworkURL,
-			presence.StartEpoch,
-			presence.EndEpoch,
+			p.Title,
+			p.State,
+			p.TitleURL,
+			p.ArtworkURL,
+			p.StartEpoch,
+			p.EndEpoch,
 		)
 	}
 
@@ -179,4 +190,16 @@ func (a *App) reset(dc *PresenceClient) {
 		(*dc).Close()
 		*dc = nil
 	}
+}
+
+func isSessionActive(sess *jellyfin.Session) bool {
+	if sess == nil {
+		return false
+	}
+
+	if sess.NowPlayingItem.Name == "" || sess.NowPlayingItem.ID == "" {
+		return false
+	}
+
+	return true
 }
