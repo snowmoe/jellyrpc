@@ -37,17 +37,6 @@ func NewPrompt(in io.Reader, out io.Writer) *Prompt {
 var exampleCfg string
 
 func runSetup() error {
-	var (
-		baseCfg = exampleCfg
-
-		// either set from an existing config, or empty if we couldn't find it,
-		// used as the default when asking for jf server url
-		jellyfinURL string
-
-		hasQC bool
-		useQC bool
-	)
-
 	uid := os.Geteuid()
 	if uid == 0 {
 		return errors.New("running as root, try again as a user")
@@ -58,37 +47,68 @@ func runSetup() error {
 		return err
 	}
 
-	// attempt to read an existing config file
-	existing, err := os.ReadFile(cfgPath)
-	switch {
-	case err == nil:
-		// if it exists we attempt to parse it
-		cfg, _, err := parseConfig(bytes.NewReader(existing))
-		if err == nil {
-			// if we parsed okay then set the url from the config
-			jellyfinURL = cfg.JellyfinURL
-		}
-		// overwrite the example config with the existing one regardless
-		baseCfg = string(existing)
-	case errors.Is(err, fs.ErrNotExist):
-		// do nothing, we'll just use the example config
-	default:
+	baseCfg, jellyfinURL, err := configSource(cfgPath)
+	if err != nil {
 		return err
 	}
 
 	p := NewPrompt(os.Stdin, os.Stdout)
+	ctx := context.Background()
 
-	ctx, stop := context.WithCancel(context.Background())
-	defer stop()
-
-	// asks for the jellyfin server url and tests it, only returning
-	// a jellyfin.Client once confirmed
 	c, err := askServer(ctx, p, jellyfinURL)
 	if err != nil {
 		return err
 	}
 
-	hasQC, err = c.QuickConnectEnabled(ctx)
+	// setup authentication (qc or api key)
+	err = authenticate(ctx, p, c)
+	if err != nil {
+		return err
+	}
+
+	// update/create the config with the new auth, and save
+	err = saveConfig(cfgPath, baseCfg, c)
+	if err != nil {
+		return err
+	}
+
+	fmt.Fprintf(p.out, "\nwrote new config to %s\n", cfgPath)
+	return nil
+}
+
+// saveConfig updates/fills JELLYFIN_URL, JELLYFIN_USER, and JELLYFIN_KEY from
+// the provided jellyfin.Client into the provided source.
+// then atomically writes the new config to the path provided
+func saveConfig(path, src string, c *jellyfin.Client) error {
+	// if we got this far we can just overwrite the url anyway, and if
+	// anything it'll be cleaner, as it's sanitised already
+	newValues := map[string]string{
+		"JELLYFIN_URL":  c.BaseURL,
+		"JELLYFIN_USER": c.UserName,
+		"JELLYFIN_KEY":  c.APIKey,
+	}
+
+	// baseCfg being either the example, or an existing one we loaded
+	newCfg := updateConfig(src, newValues)
+
+	cfgDir := filepath.Dir(path)
+
+	err := os.MkdirAll(cfgDir, 0o700)
+	if err != nil {
+		return err
+	}
+
+	return writeFileAtomic(path, []byte(newCfg))
+}
+
+// authenticate checks if quick connect is enabled, and prompts to setup
+// quick connect or setup with an api key. will set new key + username
+// in the jellyfin.Client provided
+func authenticate(ctx context.Context, p *Prompt, c *jellyfin.Client) error {
+	var useQC bool
+
+	// check if quick connect is enabled
+	hasQC, err := c.QuickConnectEnabled(ctx)
 	if err != nil {
 		return err
 	}
@@ -100,52 +120,32 @@ func runSetup() error {
 		}
 	}
 
-	if useQC {
-		auth, err := askQuickConnect(ctx, p, c)
-		if err != nil {
-			return err
-		}
-
-		// set the client key and name, the url is already set from askServer
-		c.APIKey = auth.Token
-		c.UserName = auth.User.Name
-
-		user, err := c.CurrentUser(ctx)
-		if err != nil {
-			return err
-		}
-
-		fmt.Fprintf(p.out, "authentication successful for user: %s\n", user.Name)
-	} else {
+	if !useQC {
+		// TODO implement api key setup
 		return errors.New("key setup not implemented yet")
 	}
 
-	// if we got this far we can just overwrite the url anyway, and if
-	// anything it'll be cleaner, as it's sanitised already
-	newValues := map[string]string{
-		"JELLYFIN_URL":  c.BaseURL,
-		"JELLYFIN_USER": c.UserName,
-		"JELLYFIN_KEY":  c.APIKey,
-	}
-
-	// baseCfg being either the example, or an existing one we loaded
-	newCfg := updateConfig(baseCfg, newValues)
-
-	cfgDir := filepath.Dir(cfgPath)
-
-	err = os.MkdirAll(cfgDir, 0o700)
+	auth, err := askQuickConnect(ctx, p, c)
 	if err != nil {
 		return err
 	}
 
-	err = writeFileAtomic(cfgPath, []byte(newCfg))
+	// set the client key and name, the url is already set from askServer
+	c.APIKey = auth.Token
+	c.UserName = auth.User.Name
+
+	user, err := c.CurrentUser(ctx)
 	if err != nil {
 		return err
 	}
+
+	fmt.Fprintf(p.out, "authentication successful for user: %s\n", user.Name)
 
 	return nil
 }
 
+// writeFileAtomic atomically writes data into the file path provided,
+// creating a temp file beside the file path, before renaming over top.
 func writeFileAtomic(path string, data []byte) error {
 	dir := filepath.Dir(path)
 
@@ -183,7 +183,7 @@ func writeFileAtomic(path string, data []byte) error {
 	return nil
 }
 
-// takes a source config, and a map of new values, updates any
+// updateConfig takes a source config, and a map of new values, updates any
 // existing lines with the new values, and appending anything new
 func updateConfig(src string, values map[string]string) string {
 	var b strings.Builder
@@ -239,6 +239,34 @@ func updateConfig(src string, values map[string]string) string {
 	return b.String()
 }
 
+// configSource takes a config path and returns it's contents (if it exists),
+// the url (if parseable), and an error. if no config file exists it returns
+// the example config and an empty url
+func configSource(path string) (src, url string, err error) {
+	// attempt to read an existing config file
+	existing, err := os.ReadFile(path)
+	switch {
+	case err == nil:
+		// if it exists we attempt to parse it
+		cfg, _, err := parseConfig(bytes.NewReader(existing))
+		if err == nil {
+			// if we parsed okay then set the url from the config
+			url = cfg.JellyfinURL
+		}
+
+		src = string(existing)
+	case errors.Is(err, fs.ErrNotExist):
+		// use the example config as src
+		src = exampleCfg
+	default:
+		return "", "", err
+	}
+
+	return src, url, nil
+}
+
+// waitForQC polls /QuickConnect/Connect to check if the quick connect code
+// has been entered
 func waitForQC(ctx context.Context, c *jellyfin.Client, interval time.Duration, secret string) error {
 	pollCtx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -261,6 +289,9 @@ func waitForQC(ctx context.Context, c *jellyfin.Client, interval time.Duration, 
 	}
 }
 
+// askQuickConnect prompts the user to setup quick connect, inititing the qc setup,
+// displaying the code and polling until entered with a 3 min expiry, then
+// authenticates with the qc secret and returns the authorization (user + token)
 func askQuickConnect(ctx context.Context, p *Prompt, c *jellyfin.Client) (jellyfin.Authorization, error) {
 	qc, err := c.InitiateQC(ctx)
 	if err != nil {
@@ -304,8 +335,9 @@ enter code in jellyfin under profile > Quick Connect
 	return auth, nil
 }
 
-func askServer(ctx context.Context, p *Prompt, url string) (*jellyfin.Client, error) {
-	def := url
+// askServer asks for the jellyfin server url and tests it, prompting until confirmed.
+// can take a default url to prompt as the initial default.
+func askServer(ctx context.Context, p *Prompt, def string) (*jellyfin.Client, error) {
 	for {
 		// this will loop itself for required if url is empty
 		jellyfinURL, err := p.String("jellyfin server url", def)
