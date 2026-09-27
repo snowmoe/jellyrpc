@@ -6,6 +6,7 @@ import (
 	"github.com/snowmoe/jellyrpc/internal/jellyfin"
 )
 
+// will probably make the bridge open source and self hostable, making this configurable in future
 const bridgeAPI = "https://rot.sh/poster"
 
 // jellyfin reports time in 100ns ticks so 1e7 of them make a second
@@ -27,6 +28,10 @@ type Options struct {
 	UseDBLink     bool
 }
 
+// Build takes a set of options (derived from config), a jellyfin Session,
+// and the current unix time. building and returning an rpc Activity based on
+// the set options, the current jellyfin session, and the progress bar
+// calculated from the jellyfin session progress.
 func Build(opts Options, sess *jellyfin.Session, nowMillis int64) Activity {
 	item := sess.NowPlayingItem
 
