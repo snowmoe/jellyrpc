@@ -73,8 +73,218 @@ func runSetup() error {
 		return err
 	}
 
-	fmt.Fprintf(p.out, "\nwrote new config to %s\n", cfgPath)
+	fmt.Fprintf(p.out, `
+jellyrpc setup complete
+
+  server : %s
+  user   : %s
+
+`, c.BaseURL, c.UserName)
+
+	fmt.Fprintf(p.out, "wrote new config to %s\n", cfgPath)
 	return nil
+}
+
+// authenticate checks if quick connect is enabled, and prompts to setup
+// quick connect or setup with an api key. then setting the new key + username
+// in the jellyfin.Client provided
+func authenticate(ctx context.Context, p *Prompt, c *jellyfin.Client) error {
+	var (
+		useQC bool
+		name  string
+		token string
+	)
+
+	// check if quick connect is enabled
+	hasQC, err := c.QuickConnectEnabled(ctx)
+	if err != nil {
+		return err
+	}
+
+	if hasQC {
+		useQC, err = p.BoolWithChars("use (Q)uick Connect or paste a (k)ey?", true, "q", "k")
+		if err != nil {
+			return err
+		}
+	}
+
+	if useQC {
+		name, token, err = askQuickConnect(ctx, p, c)
+	} else {
+		name, token, err = askKey(ctx, p, c)
+	}
+
+	if err != nil {
+		return err
+	}
+
+	// set the client key and name, the url is already set from askServer
+	c.UserName, c.APIKey = name, token
+
+	fmt.Fprintf(p.out, "authentication successful for user: %s\n", name)
+
+	return nil
+}
+
+// askKey prompts for an api key or user token, if it is a user token it
+// returns the token owner's username and the key, if it's an api key
+// it calls askUserName before returning the username and key
+func askKey(ctx context.Context, p *Prompt, c *jellyfin.Client) (userName, key string, err error) {
+	for {
+		key, err = p.String("api key or token", "")
+		if err != nil {
+			return "", "", err
+		}
+
+		c.APIKey = key
+
+		// if usertoken then return username and key
+		user, err := c.CurrentUser(ctx)
+		if err == nil {
+			return user.Name, key, nil
+		}
+
+		statErr, ok := errors.AsType[*jellyfin.StatusError](err)
+		switch {
+		case !ok:
+			return "", "", err
+		case statErr.Code == 401:
+			fmt.Fprintln(p.out, "\nkey or token was rejected")
+			continue
+		case statErr.Code != 400:
+			return "", "", err
+		}
+
+		// we got a status 400 back from jellyfin meaning it's an
+		// api key, which isn't tied to a user(name), so we prompt for that
+
+		userName, err = askUserName(ctx, p, c)
+		if err != nil {
+			return "", "", err
+		}
+
+		return userName, key, nil
+	}
+}
+
+// askUserName gets all the jellyfin users, prompts for a username
+// and checks if that user exists in jellyfin
+func askUserName(ctx context.Context, p *Prompt, c *jellyfin.Client) (string, error) {
+	fmt.Fprintln(p.out, "\nenter the jellyfin user to use the status of")
+
+	users, err := c.Users(ctx)
+	if err != nil {
+		return "", err
+	}
+
+	for {
+		userName, err := p.String("username", "")
+		if err != nil {
+			return "", err
+		}
+
+		for _, u := range users {
+			if strings.EqualFold(u.Name, userName) {
+				return u.Name, nil
+			}
+		}
+
+		fmt.Fprintf(p.out, "user %q doesn't exist\n\n", userName)
+	}
+}
+
+// waitForQC polls /QuickConnect/Connect to check if the quick connect code
+// has been entered
+func waitForQC(ctx context.Context, c *jellyfin.Client, interval time.Duration, secret string) error {
+	pollCtx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	for {
+		ok, err := c.ConnectQC(pollCtx, secret)
+		if err != nil {
+			return err
+		}
+
+		if ok {
+			return nil
+		}
+
+		select {
+		case <-pollCtx.Done():
+			return pollCtx.Err()
+		case <-time.After(interval):
+		}
+	}
+}
+
+// askQuickConnect prompts the user to setup quick connect, inititing the qc setup,
+// displaying the code and polling until entered with a 3 min expiry, then
+// authenticates with the qc secret. returning the username, token, and an error
+func askQuickConnect(ctx context.Context, p *Prompt, c *jellyfin.Client) (string, string, error) {
+	qc, err := c.InitiateQC(ctx)
+	if err != nil {
+		return "", "", err
+	}
+
+	fmt.Fprintf(p.out, `
+enter code in jellyfin under profile > Quick Connect
+
+  Quick Connect code: %s
+
+`, qc.Code)
+	fmt.Fprintf(p.out, "waiting (3 mins) for Quick Connect code to be entered... ")
+
+	qcCtx, stop := context.WithTimeout(ctx, 3*time.Minute)
+	defer stop()
+
+	err = waitForQC(qcCtx, c, 3*time.Second, qc.Secret)
+	// get this out of the way to avoid things writing on the waiting line
+	if err != nil {
+		fmt.Fprintln(p.out)
+	}
+
+	// then actually handle da errors
+	if errors.Is(err, context.Canceled) {
+		return "", "", errors.New("Quick Connect setup cancelled")
+	} else if errors.Is(err, context.DeadlineExceeded) {
+		return "", "", errors.New("code expired, run setup again")
+	} else if err != nil {
+		return "", "", err
+	}
+
+	auth, err := c.AuthenticateQC(ctx, qc.Secret)
+	if err != nil {
+		fmt.Fprintln(p.out)
+		return "", "", err
+	}
+
+	fmt.Fprintln(p.out, "success!")
+
+	return auth.User.Name, auth.Token, nil
+}
+
+// askServer asks for the jellyfin server url and tests it, prompting until confirmed.
+// can take a default url to prompt as the initial default.
+func askServer(ctx context.Context, p *Prompt, def string) (*jellyfin.Client, error) {
+	for {
+		// this will loop itself for required if url is empty
+		jellyfinURL, err := p.String("jellyfin server url", def)
+		if err != nil {
+			return nil, err
+		}
+
+		def = jellyfin.SanitiseURL(jellyfinURL)
+
+		c := jellyfin.NewClient(def, "", gitVersion)
+
+		info, err := c.PublicSystemInfo(ctx)
+		if err == nil {
+			fmt.Fprintf(p.out, "using %s (%s)\n\n", def, info.ServerName)
+			return c, nil
+		}
+
+		fmt.Fprintf(p.out, "can't reach server: %s\n\n", err.Error())
+	}
 }
 
 // saveConfig updates/fills JELLYFIN_URL, JELLYFIN_USER, and JELLYFIN_KEY from
@@ -100,49 +310,6 @@ func saveConfig(path, src string, c *jellyfin.Client) error {
 	}
 
 	return writeFileAtomic(path, []byte(newCfg))
-}
-
-// authenticate checks if quick connect is enabled, and prompts to setup
-// quick connect or setup with an api key. will set new key + username
-// in the jellyfin.Client provided
-func authenticate(ctx context.Context, p *Prompt, c *jellyfin.Client) error {
-	var useQC bool
-
-	// check if quick connect is enabled
-	hasQC, err := c.QuickConnectEnabled(ctx)
-	if err != nil {
-		return err
-	}
-
-	if hasQC {
-		useQC, err = p.BoolWithChars("use (Q)uick Connect or paste a (k)ey?", true, "q", "k")
-		if err != nil {
-			return err
-		}
-	}
-
-	if !useQC {
-		// TODO implement api key setup
-		return errors.New("key setup not implemented yet")
-	}
-
-	auth, err := askQuickConnect(ctx, p, c)
-	if err != nil {
-		return err
-	}
-
-	// set the client key and name, the url is already set from askServer
-	c.APIKey = auth.Token
-	c.UserName = auth.User.Name
-
-	user, err := c.CurrentUser(ctx)
-	if err != nil {
-		return err
-	}
-
-	fmt.Fprintf(p.out, "authentication successful for user: %s\n", user.Name)
-
-	return nil
 }
 
 // writeFileAtomic atomically writes data into the file path provided,
@@ -264,100 +431,6 @@ func configSource(path string) (src, url string, err error) {
 	}
 
 	return src, url, nil
-}
-
-// waitForQC polls /QuickConnect/Connect to check if the quick connect code
-// has been entered
-func waitForQC(ctx context.Context, c *jellyfin.Client, interval time.Duration, secret string) error {
-	pollCtx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
-	defer stop()
-
-	for {
-		ok, err := c.ConnectQC(pollCtx, secret)
-		if err != nil {
-			return err
-		}
-
-		if ok {
-			return nil
-		}
-
-		select {
-		case <-pollCtx.Done():
-			return pollCtx.Err()
-		case <-time.After(interval):
-		}
-	}
-}
-
-// askQuickConnect prompts the user to setup quick connect, inititing the qc setup,
-// displaying the code and polling until entered with a 3 min expiry, then
-// authenticates with the qc secret and returns the authorization (user + token)
-func askQuickConnect(ctx context.Context, p *Prompt, c *jellyfin.Client) (jellyfin.Authorization, error) {
-	qc, err := c.InitiateQC(ctx)
-	if err != nil {
-		return jellyfin.Authorization{}, err
-	}
-
-	fmt.Fprintf(p.out, `
-enter code in jellyfin under profile > Quick Connect
-
-  Quick Connect code: %s
-
-`, qc.Code)
-	fmt.Fprintf(p.out, "waiting (3 mins) for Quick Connect code to be entered... ")
-
-	qcCtx, stop := context.WithTimeout(ctx, 3*time.Minute)
-	defer stop()
-
-	err = waitForQC(qcCtx, c, 3*time.Second, qc.Secret)
-	// get this out of the way to avoid things writing on the waiting line
-	if err != nil {
-		fmt.Fprintln(p.out)
-	}
-
-	// then actually handle da errors
-	if errors.Is(err, context.Canceled) {
-		return jellyfin.Authorization{}, errors.New("Quick Connect setup cancelled")
-	} else if errors.Is(err, context.DeadlineExceeded) {
-		return jellyfin.Authorization{}, errors.New("code expired, run setup again")
-	} else if err != nil {
-		return jellyfin.Authorization{}, err
-	}
-
-	auth, err := c.AuthenticateQC(ctx, qc.Secret)
-	if err != nil {
-		fmt.Fprintln(p.out)
-		return jellyfin.Authorization{}, err
-	}
-
-	fmt.Fprintln(p.out, "success!")
-
-	return auth, nil
-}
-
-// askServer asks for the jellyfin server url and tests it, prompting until confirmed.
-// can take a default url to prompt as the initial default.
-func askServer(ctx context.Context, p *Prompt, def string) (*jellyfin.Client, error) {
-	for {
-		// this will loop itself for required if url is empty
-		jellyfinURL, err := p.String("jellyfin server url", def)
-		if err != nil {
-			return nil, err
-		}
-
-		def = jellyfin.SanitiseURL(jellyfinURL)
-
-		c := jellyfin.NewClient(def, "", gitVersion)
-
-		info, err := c.PublicSystemInfo(ctx)
-		if err == nil {
-			fmt.Fprintf(p.out, "using %s (%s)\n\n", def, info.ServerName)
-			return c, nil
-		}
-
-		fmt.Fprintf(p.out, "can't reach server: %s\n\n", err.Error())
-	}
 }
 
 func (p *Prompt) input(prompt string) (string, error) {
