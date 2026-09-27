@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -118,12 +119,17 @@ func loadConfig(path string) (*Config, []string, error) {
 	}
 	defer file.Close()
 
+	return parseConfig(file)
+}
+
+// TODO move the unknown keys into a custom config error type
+func parseConfig(r io.Reader) (*Config, []string, error) {
 	var unknown []string
 
 	// -1 marks pause timeout as unset so ApplyDefaults can tell it apart from
 	// an explicit 0 which disables the timeout
 	cfg := &Config{PauseTimeout: -1}
-	scanner := bufio.NewScanner(file)
+	scanner := bufio.NewScanner(r)
 
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
@@ -172,7 +178,7 @@ func loadConfig(path string) (*Config, []string, error) {
 		}
 	}
 
-	err = scanner.Err()
+	err := scanner.Err()
 	if err != nil {
 		return nil, unknown, err
 	}
