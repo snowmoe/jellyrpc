@@ -108,7 +108,7 @@ func run() error {
 	Info("starting jellyfin rpc daemon")
 	Info("running %s", version())
 
-	cfgPath, err := GetConfigPath()
+	cfgPath, err := ConfigPath()
 	if err != nil {
 		return err
 	}

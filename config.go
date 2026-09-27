@@ -33,8 +33,8 @@ func parseBool(val string) bool {
 	return false
 }
 
-func GetConfigPath() (string, error) {
-	configDir, err := GetConfigDir()
+func ConfigPath() (string, error) {
+	configDir, err := ConfigDir()
 	if err != nil {
 		return "", err
 	}
@@ -42,7 +42,7 @@ func GetConfigPath() (string, error) {
 	return filepath.Join(configDir, "config"), nil
 }
 
-func GetConfigDir() (string, error) {
+func ConfigDir() (string, error) {
 	configDir, err := os.UserConfigDir()
 	if err != nil {
 		return "", fmt.Errorf("unable to get config dir: %w", err)

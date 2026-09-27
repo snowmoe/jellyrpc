@@ -42,7 +42,7 @@ func runSetup() error {
 		return errors.New("running as root, try again as a user")
 	}
 
-	cfgPath, err := GetConfigPath()
+	cfgPath, err := ConfigPath()
 	if err != nil {
 		return err
 	}
@@ -88,7 +88,7 @@ func saveConfig(path, src string, c *jellyfin.Client) error {
 		"JELLYFIN_KEY":  c.APIKey,
 	}
 
-	// baseCfg being either the example, or an existing one we loaded
+	// src being either the example, or an existing one we loaded
 	newCfg := updateConfig(src, newValues)
 
 	cfgDir := filepath.Dir(path)

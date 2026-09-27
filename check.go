@@ -142,7 +142,7 @@ func runCheck() error {
 	// config checks
 	fmt.Println("CONFIG")
 
-	cfgPath, err := GetConfigPath()
+	cfgPath, err := ConfigPath()
 	if err != nil {
 		// return this directly because somethings seriously fucked
 		// if we can't even build the config path
