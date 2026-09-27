@@ -59,14 +59,14 @@ type timestamps struct {
 	End   int64 `json:"end,omitempty"`
 }
 
-// because we have functions on this struct so when used later in main.go
-// we can just call <Conn var name>.SetWatching() without having to
-// pass in a pointer to the socket connection every time
+// Conn wraps a net.Conn and a version string, used for rpc methods
 type Conn struct {
 	conn    net.Conn
 	version string
 }
 
+// DiscoverIPCSocket searches discord ipc socket paths and returns a net.Conn after
+// finding the first one that dials
 func DiscoverIPCSocket() (net.Conn, error) {
 	var (
 		conn net.Conn
@@ -81,8 +81,7 @@ func DiscoverIPCSocket() (net.Conn, error) {
 		runtimeDir = "/tmp"
 	}
 
-	// discord exposes sockets as discord-ipc-0..9, extra clients (flatpak, a
-	// second install) land on higher numbers so try each and take the first
+	// TODO search flatpak/snap discord socket paths
 	for i := range 10 {
 		socketPath := filepath.Join(runtimeDir, fmt.Sprintf("discord-ipc-%d", i))
 		conn, err = net.Dial("unix", socketPath)
@@ -97,8 +96,8 @@ func DiscoverIPCSocket() (net.Conn, error) {
 	return conn, nil
 }
 
-// initiates a connection with discords ipc, completes a handshake
-// and returns a pointer to a DiscordConn type to be used for calling the other funcs
+// NewConn initiates a connection with discords ipc, completes a handshake
+// and returns a pointer to a DiscordConn
 func NewConn(clientID, version string) (*Conn, error) {
 	conn, err := DiscoverIPCSocket()
 	if err != nil {
@@ -178,6 +177,8 @@ func (dc *Conn) send(opcode uint32, payload []byte) error {
 // that's where the cool byte level shit ends, now it's just boring rpc shit..
 // of which I haven't commented much because it's pretty simple to understand
 
+// SetWatching sets the rpc activity to a watching type, filled with the
+// arguments provided, large image hover text is set to 'jellyrpc vX.X.X'
 func (dc *Conn) SetWatching(title, status, titleURL, arturl string, startEpoch, endEpoch int64) error {
 	// if the title or status are emtpy just send an empty activity to clear
 	if title == "" && status == "" {
@@ -206,9 +207,7 @@ func (dc *Conn) SetWatching(title, status, titleURL, arturl string, startEpoch, 
 	return dc.setActivity(activity)
 }
 
-// simeple func to set a "paused" state
-// attempted to try send an empty SET_ACTIVITY but that doesn't
-// clear the rpc activity, instead fallsback to something adhoc
+// SetPaused sets the rpc activity state to "Paused" filled with args provided
 func (dc *Conn) SetPaused(title, titleURL, arturl string) error {
 	return dc.setActivity(activity{
 		Type:       3,
@@ -246,7 +245,7 @@ func (dc *Conn) setActivity(activity activity) error {
 	return err
 }
 
-// just close the socket connection without sending an
+// Close closes the underlying net.Conn socket without sending an
 // empty payload or opcode 2
 func (dc *Conn) Close() {
 	if dc.conn != nil {
