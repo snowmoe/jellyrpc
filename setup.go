@@ -30,6 +30,11 @@ func NewPrompt(in io.Reader, out io.Writer) *Prompt {
 }
 
 func runSetup() error {
+	var (
+		hasQC bool
+		useQC bool
+	)
+
 	uid := os.Geteuid()
 	if uid == 0 {
 		return errors.New("running as root, try again as a user")
@@ -40,29 +45,31 @@ func runSetup() error {
 		return err
 	}
 
+	// attempt to load an existing config and use
+	// the existing url as the default for the url question
 	jellyfinURL := ""
 	cfg, _, err := loadConfig(cfgPath)
 	if err == nil {
 		jellyfinURL = cfg.JellyfinURL
 	}
 
-	// inputs
 	p := NewPrompt(os.Stdin, os.Stdout)
 
 	ctx, stop := context.WithCancel(context.Background())
 	defer stop()
 
+	// asks for the jellyfin server url and tests it, only returning
+	// a jellyfin.Client once confirmed
 	c, err := askServer(ctx, p, jellyfinURL)
 	if err != nil {
 		return err
 	}
 
-	hasQC, err := c.QuickConnectEnabled(ctx)
+	hasQC, err = c.QuickConnectEnabled(ctx)
 	if err != nil {
 		return err
 	}
 
-	var useQC bool
 	if hasQC {
 		useQC, err = p.BoolWithChars("use (Q)uick Connect or paste a (k)ey?", true, "q", "k")
 		if err != nil {
