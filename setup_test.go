@@ -1,10 +1,18 @@
 package main
 
 import (
+	"bytes"
+	"context"
+	"errors"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/snowmoe/jellyrpc/internal/jellyfin"
 )
@@ -339,4 +347,356 @@ func assertFile(t *testing.T, path, contents string, perm os.FileMode) {
 	if info.Mode().Perm() != perm {
 		t.Errorf("expected perms %#o, got %#o", perm, info.Mode().Perm())
 	}
+}
+
+// newTestPrompt returns a prompt reading from input, and the buffer it writes to
+func newTestPrompt(input string) (*Prompt, *bytes.Buffer) {
+	var out bytes.Buffer
+	return NewPrompt(strings.NewReader(input), &out), &out
+}
+
+func TestPromptString(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		def      string
+		expected string
+		wantErr  bool
+		prompt   string
+	}{
+		{name: "empty uses default", input: "\n", def: "salmon", expected: "salmon", prompt: "fish [salmon]: "},
+		{name: "input over default", input: "trout\n", def: "salmon", expected: "trout"},
+		{name: "input trimmed", input: "  trout \t\n", def: "salmon", expected: "trout"},
+		{name: "required loops until value", input: "\n\ntrout\n", expected: "trout", prompt: "fish (required): "},
+		{name: "eof after text", input: "trout", expected: "trout"},
+		{name: "eof with nothing", input: "", wantErr: true},
+		{name: "eof while required", input: "\n", wantErr: true},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			p, out := newTestPrompt(tc.input)
+
+			got, err := p.String("fish", tc.def)
+			if tc.wantErr {
+				if !errors.Is(err, io.EOF) {
+					t.Errorf("expected EOF error, got: %v", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+
+			if got != tc.expected {
+				t.Errorf("expected %q, got %q", tc.expected, got)
+			}
+			if tc.prompt != "" && !strings.HasPrefix(out.String(), tc.prompt) {
+				t.Errorf("expected prompt %q, got output %q", tc.prompt, out.String())
+			}
+		})
+	}
+}
+
+func TestPromptStringRequiredMsg(t *testing.T) {
+	p, out := newTestPrompt("\n\ntrout\n")
+
+	_, err := p.String("fish", "")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if n := strings.Count(out.String(), "fish cannot be empty"); n != 2 {
+		t.Errorf("expected 2 empty msgs, got %d in %q", n, out.String())
+	}
+}
+
+func TestPromptBool(t *testing.T) {
+	tests := []struct {
+		name      string
+		input     string
+		def       bool
+		trueChar  string
+		falseChar string
+		expected  bool
+		prompt    string
+	}{
+		{name: "empty default true", input: "\n", def: true, trueChar: "y", falseChar: "n", expected: true, prompt: "fish? [Y/n] "},
+		{name: "empty default false", input: "\n", def: false, trueChar: "y", falseChar: "n", expected: false, prompt: "fish? [y/N] "},
+		{name: "upper input", input: "Y\n", trueChar: "y", falseChar: "n", expected: true},
+		{name: "false char", input: "n\n", def: true, trueChar: "y", falseChar: "n", expected: false},
+		{name: "bad input retries", input: "salmon\ny\n", trueChar: "y", falseChar: "n", expected: true},
+		{name: "custom chars", input: "K\n", def: true, trueChar: "q", falseChar: "k", expected: false, prompt: "fish? [Q/k] "},
+		// chars passed in upper should still be lowered
+		{name: "upper chars", input: "q\n", trueChar: "Q", falseChar: "K", expected: true, prompt: "fish? [q/K] "},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			p, out := newTestPrompt(tc.input)
+
+			got, err := p.BoolWithChars("fish?", tc.def, tc.trueChar, tc.falseChar)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+
+			if got != tc.expected {
+				t.Errorf("expected %v, got %v", tc.expected, got)
+			}
+			if tc.prompt != "" && !strings.HasPrefix(out.String(), tc.prompt) {
+				t.Errorf("expected prompt %q, got output %q", tc.prompt, out.String())
+			}
+		})
+	}
+}
+
+func TestPromptBoolRetryMsg(t *testing.T) {
+	p, out := newTestPrompt("salmon\ny\n")
+
+	_, err := p.Bool("fish?", false)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if !strings.Contains(out.String(), "enter y or n") {
+		t.Errorf("expected retry msg, got %q", out.String())
+	}
+}
+
+func TestPromptBoolEOF(t *testing.T) {
+	p, _ := newTestPrompt("")
+
+	_, err := p.Bool("fish?", true)
+	if !errors.Is(err, io.EOF) {
+		t.Errorf("expected EOF error, got: %v", err)
+	}
+}
+
+// meHandler acts like /Users/Me, salmon is a user token for a user (snow),
+// trout is an api key (400), anything else is rejected
+func meHandler(t *testing.T) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case hasToken(r, "salmon"):
+			respondJSON(t, jellyfin.User{Name: "snow"})(w, r)
+		case hasToken(r, "trout"):
+			w.WriteHeader(http.StatusBadRequest)
+		default:
+			w.WriteHeader(http.StatusUnauthorized)
+		}
+	}
+}
+
+func TestAskKey(t *testing.T) {
+	users := []jellyfin.User{{Name: "pike"}, {Name: "Snow"}}
+
+	tests := []struct {
+		name     string
+		input    string
+		wantName string
+		wantKey  string
+		outMsg   string
+	}{
+		{name: "user token", input: "salmon\n", wantName: "snow", wantKey: "salmon"},
+		{name: "rejected then token", input: "cod\nsalmon\n", wantName: "snow", wantKey: "salmon", outMsg: "key or token was rejected"},
+		// api key isn't tied to a user so it has to ask, and uses jellyfin's spelling
+		{name: "api key", input: "trout\nsnow\n", wantName: "Snow", wantKey: "trout", outMsg: "enter the jellyfin user"},
+		{name: "api key unknown user retries", input: "trout\ncod\nsnow\n", wantName: "Snow", wantKey: "trout", outMsg: `user "cod" doesn't exist`},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			c := newFakeJellyfin(t, "", map[string]http.HandlerFunc{
+				"GET /Users/Me": meHandler(t),
+				"GET /Users":    respondJSON(t, users),
+			})
+			p, out := newTestPrompt(tc.input)
+
+			name, key, err := askKey(context.Background(), p, c)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+
+			if name != tc.wantName || key != tc.wantKey {
+				t.Errorf("expected %s/%s, got %s/%s", tc.wantName, tc.wantKey, name, key)
+			}
+			if tc.outMsg != "" && !strings.Contains(out.String(), tc.outMsg) {
+				t.Errorf("expected output to contain %q, got %q", tc.outMsg, out.String())
+			}
+		})
+	}
+}
+
+func TestAskKeyErrors(t *testing.T) {
+	t.Run("server error", func(t *testing.T) {
+		c := newFakeJellyfin(t, "", map[string]http.HandlerFunc{
+			"GET /Users/Me": respondStatus(http.StatusInternalServerError),
+		})
+		p, _ := newTestPrompt("salmon\n")
+
+		_, _, err := askKey(context.Background(), p, c)
+
+		statErr, ok := errors.AsType[*jellyfin.StatusError](err)
+		if !ok || statErr.Code != 500 {
+			t.Errorf("expected 500 *StatusError, got: %v", err)
+		}
+	})
+
+	t.Run("users error", func(t *testing.T) {
+		c := newFakeJellyfin(t, "", map[string]http.HandlerFunc{
+			"GET /Users/Me": meHandler(t),
+			"GET /Users":    respondStatus(http.StatusForbidden),
+		})
+		p, _ := newTestPrompt("trout\nsnow\n")
+
+		_, _, err := askKey(context.Background(), p, c)
+		if err == nil {
+			t.Error("expected error, got nil")
+		}
+	})
+
+	t.Run("eof", func(t *testing.T) {
+		c := newFakeJellyfin(t, "", map[string]http.HandlerFunc{
+			"GET /Users/Me": meHandler(t),
+		})
+		p, _ := newTestPrompt("cod\n")
+
+		_, _, err := askKey(context.Background(), p, c)
+		if !errors.Is(err, io.EOF) {
+			t.Errorf("expected EOF error, got: %v", err)
+		}
+	})
+}
+
+func TestAuthenticate(t *testing.T) {
+	tests := []struct {
+		name    string
+		qc      bool
+		input   string
+		askedQC bool
+	}{
+		// no qc on the server means we shouldn't even ask
+		{name: "qc disabled", qc: false, input: "salmon\n", askedQC: false},
+		{name: "qc enabled pick key", qc: true, input: "k\nsalmon\n", askedQC: true},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			c := newFakeJellyfin(t, "", map[string]http.HandlerFunc{
+				"GET /QuickConnect/Enabled": respondJSON(t, tc.qc),
+				"GET /Users/Me":             meHandler(t),
+			})
+			p, out := newTestPrompt(tc.input)
+
+			err := authenticate(context.Background(), p, c)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+
+			if c.UserName != "snow" || c.APIKey != "salmon" {
+				t.Errorf("expected client snow/salmon, got %s/%s", c.UserName, c.APIKey)
+			}
+
+			asked := strings.Contains(out.String(), "(Q)uick Connect")
+			if asked != tc.askedQC {
+				t.Errorf("expected qc asked: %v, got output %q", tc.askedQC, out.String())
+			}
+		})
+	}
+}
+
+func TestAskServer(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /System/Info/Public", respondJSON(t, jellyfin.SystemInfo{ServerName: "salmon"}))
+
+	live := httptest.NewServer(mux)
+	t.Cleanup(live.Close)
+
+	// grab a url then close it so nothing's listening there
+	dead := httptest.NewServer(mux)
+	deadURL := dead.URL
+	dead.Close()
+
+	t.Run("unreachable then sanitised url", func(t *testing.T) {
+		// no protocol + web ui path, should get sanitised back to the real url
+		messy := strings.TrimPrefix(live.URL, "http://") + "/web/"
+		p, out := newTestPrompt(deadURL + "\n" + messy + "\n")
+
+		c, err := askServer(context.Background(), p, "")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		if c.BaseURL != live.URL {
+			t.Errorf("expected %s, got %s", live.URL, c.BaseURL)
+		}
+		for _, msg := range []string{"can't reach server", "using " + live.URL + " (salmon)"} {
+			if !strings.Contains(out.String(), msg) {
+				t.Errorf("expected output to contain %q, got %q", msg, out.String())
+			}
+		}
+	})
+
+	t.Run("accepts default", func(t *testing.T) {
+		p, _ := newTestPrompt("\n")
+
+		c, err := askServer(context.Background(), p, live.URL)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if c.BaseURL != live.URL {
+			t.Errorf("expected %s, got %s", live.URL, c.BaseURL)
+		}
+	})
+}
+
+func TestWaitForQC(t *testing.T) {
+	t.Run("polls until authenticated", func(t *testing.T) {
+		var calls atomic.Int32
+
+		c := newFakeJellyfin(t, "", map[string]http.HandlerFunc{
+			"GET /QuickConnect/Connect": func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Query().Get("secret") != "salmon" {
+					t.Errorf("expected secret salmon, got %q", r.URL.Query().Get("secret"))
+				}
+				n := calls.Add(1)
+				respondJSON(t, jellyfin.QuickConnect{Authenticated: n >= 3})(w, r)
+			},
+		})
+
+		err := waitForQC(context.Background(), c, time.Millisecond, "salmon")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if n := calls.Load(); n != 3 {
+			t.Errorf("expected 3 polls, got %d", n)
+		}
+	})
+
+	t.Run("server error", func(t *testing.T) {
+		c := newFakeJellyfin(t, "", map[string]http.HandlerFunc{
+			"GET /QuickConnect/Connect": respondStatus(http.StatusUnauthorized),
+		})
+
+		err := waitForQC(context.Background(), c, time.Millisecond, "salmon")
+
+		_, ok := errors.AsType[*jellyfin.StatusError](err)
+		if !ok {
+			t.Errorf("expected *StatusError, got: %v", err)
+		}
+	})
+
+	t.Run("times out", func(t *testing.T) {
+		c := newFakeJellyfin(t, "", map[string]http.HandlerFunc{
+			"GET /QuickConnect/Connect": respondJSON(t, jellyfin.QuickConnect{}),
+		})
+
+		ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+		defer cancel()
+
+		err := waitForQC(ctx, c, time.Millisecond, "salmon")
+		if !errors.Is(err, context.DeadlineExceeded) {
+			t.Errorf("expected deadline exceeded, got: %v", err)
+		}
+	})
 }
