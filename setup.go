@@ -12,6 +12,7 @@ import (
 	"maps"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"slices"
 	"strings"
 	"syscall"
@@ -130,8 +131,54 @@ func runSetup() error {
 	// baseCfg being either the example, or an existing one we loaded
 	newCfg := updateConfig(baseCfg, newValues)
 
-	// zOmfg
-	fmt.Fprintln(p.out, newCfg)
+	cfgDir := filepath.Dir(cfgPath)
+
+	err = os.MkdirAll(cfgDir, 0o700)
+	if err != nil {
+		return err
+	}
+
+	err = writeFileAtomic(cfgPath, []byte(newCfg))
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func writeFileAtomic(path string, data []byte) error {
+	dir := filepath.Dir(path)
+
+	tmp, err := os.CreateTemp(dir, ".config-*.tmp")
+	if err != nil {
+		return err
+	}
+	defer tmp.Close()
+
+	tmpPath := tmp.Name()
+	// doesn't matter if this errors since it's just a best effort
+	// of cleaning up if anything goes wrong
+	defer os.Remove(tmpPath)
+
+	_, err = tmp.Write(data)
+	if err != nil {
+		return err
+	}
+
+	// sync and close explicity
+	err = tmp.Sync()
+	if err != nil {
+		return err
+	}
+	err = tmp.Close()
+	if err != nil {
+		return err
+	}
+
+	err = os.Rename(tmpPath, path)
+	if err != nil {
+		return err
+	}
 
 	return nil
 }
