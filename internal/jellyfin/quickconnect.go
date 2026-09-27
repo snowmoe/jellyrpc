@@ -6,6 +6,7 @@ import (
 	"net/url"
 )
 
+// QuickConnectEnabled gets /QuickConnect/Enabled and returns whether qc is enabled
 func (c *Client) QuickConnectEnabled(ctx context.Context) (bool, error) {
 	var ok bool
 
@@ -17,6 +18,7 @@ func (c *Client) QuickConnectEnabled(ctx context.Context) (bool, error) {
 	return ok, nil
 }
 
+// InitiateQC initiates a quick connect request
 func (c *Client) InitiateQC(ctx context.Context) (QuickConnect, error) {
 	var qc QuickConnect
 
@@ -28,7 +30,8 @@ func (c *Client) InitiateQC(ctx context.Context) (QuickConnect, error) {
 	return qc, nil
 }
 
-// checks the auth status of a quick connect request
+// ConnectQC checks the auth status of a quick connect request from a secret,
+// returns true if the qc code was entered
 func (c *Client) ConnectQC(ctx context.Context, secret string) (bool, error) {
 	if secret == "" {
 		return false, errors.New("missing QuickConnect secret")
@@ -50,6 +53,8 @@ func (c *Client) ConnectQC(ctx context.Context, secret string) (bool, error) {
 	return qcResp.Authenticated, nil
 }
 
+// AuthenticateQC attempts to authorise with a quick connect secret, returning
+// Authorization containing the jf username and token if successful
 func (c *Client) AuthenticateQC(ctx context.Context, secret string) (Authorization, error) {
 	if secret == "" {
 		return Authorization{}, errors.New("missing QuickConnect secret")

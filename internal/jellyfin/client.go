@@ -52,18 +52,20 @@ func (e *JSONDecodeError) Error() string {
 	return fmt.Sprintf("failed to decode jellyfin response:\n%v", e.Err)
 }
 
-func getDeviceID(hostname string) string {
+func generateDeviceID(hostname string) string {
 	sum := sha256.Sum256([]byte("jellyrpc:" + hostname))
 	return hex.EncodeToString(sum[:16])
 }
 
+// NewClient returns a *Client with the provided args, plus a generated
+// device ID and a http client with a 10s timeout
 func NewClient(baseURL, apiKey, version string) *Client {
 	hostname, err := os.Hostname()
 	if err != nil {
 		hostname = "unknown"
 	}
 
-	deviceID := getDeviceID(hostname)
+	deviceID := generateDeviceID(hostname)
 
 	return &Client{
 		BaseURL:  baseURL,
@@ -145,6 +147,9 @@ func (c *Client) authHeader() string {
 	return mediaBrowser
 }
 
+// ActiveSession gets /Sessions and returns a *Session for the user
+// set in the Client, otherwise returns a pointer to an empty Session
+// (not nil) if no session for that user exists
 func (c *Client) ActiveSession(ctx context.Context) (*Session, error) {
 	var sessions []Session
 
@@ -161,8 +166,7 @@ func (c *Client) ActiveSession(ctx context.Context) (*Session, error) {
 	return &Session{}, nil
 }
 
-// I could handle 503 and use returned Retry-After + Message to log and delay next poll
-// but that's bullshit and I'll think about it another day.
+// PublicSystemInfo gets /System/Info/Public and returns a SystemInfo
 func (c *Client) PublicSystemInfo(ctx context.Context) (SystemInfo, error) {
 	var info SystemInfo
 
