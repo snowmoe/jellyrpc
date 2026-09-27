@@ -85,7 +85,7 @@ func waitForConfig(ctx context.Context, cfgPath string, interval time.Duration) 
 	var lastMsg string
 
 	for {
-		cfg, err := LoadValidConfig(cfgPath)
+		cfg, err := loadValidConfig(cfgPath)
 		if err == nil {
 			return cfg, nil
 		}
@@ -108,7 +108,7 @@ func run() error {
 	Info("starting jellyfin rpc daemon")
 	Info("running %s", version())
 
-	cfgPath, err := ConfigPath()
+	cfgPath, err := configPath()
 	if err != nil {
 		return err
 	}
@@ -145,5 +145,5 @@ func run() error {
 		},
 	}
 
-	return app.Run(ctx)
+	return app.run(ctx)
 }

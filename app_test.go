@@ -84,7 +84,7 @@ func TestAppRunUpdatesPresenceAndClosesOnCancel(t *testing.T) {
 
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- app.Run(ctx)
+		errCh <- app.run(ctx)
 	}()
 
 	ticker.ch <- time.Now()

@@ -42,7 +42,7 @@ func runSetup() error {
 		return errors.New("running as root, try again as a user")
 	}
 
-	cfgPath, err := ConfigPath()
+	cfgPath, err := configPath()
 	if err != nil {
 		return err
 	}

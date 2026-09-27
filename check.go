@@ -142,7 +142,7 @@ func runCheck() error {
 	// config checks
 	fmt.Println("CONFIG")
 
-	cfgPath, err := ConfigPath()
+	cfgPath, err := configPath()
 	if err != nil {
 		// return this directly because somethings seriously fucked
 		// if we can't even build the config path
@@ -344,9 +344,9 @@ func checkConfigFile(path string) (result, *Config) {
 }
 
 func checkConfigValues(cfg *Config) result {
-	cfg.ApplyDefaults(defaultAppID)
+	cfg.applyDefaults(defaultAppID)
 
-	missing, err := cfg.Validate()
+	missing, err := cfg.validate()
 	if err != nil {
 		msg := fmt.Sprintf("%s: %s", err, strings.Join(missing, ", "))
 		return fail(msg)

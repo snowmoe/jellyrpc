@@ -45,7 +45,7 @@ type App struct {
 	discordDown bool // whether the last discord connect failed, gates repeat warns
 }
 
-func (a *App) Run(ctx context.Context) error {
+func (a *App) run(ctx context.Context) error {
 	newTicker := a.NewTicker
 	if newTicker == nil {
 		newTicker = func(d time.Duration) Ticker {

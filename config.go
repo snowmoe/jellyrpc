@@ -33,8 +33,8 @@ func parseBool(val string) bool {
 	return false
 }
 
-func ConfigPath() (string, error) {
-	configDir, err := ConfigDir()
+func configPath() (string, error) {
+	configDir, err := configDir()
 	if err != nil {
 		return "", err
 	}
@@ -42,7 +42,7 @@ func ConfigPath() (string, error) {
 	return filepath.Join(configDir, "config"), nil
 }
 
-func ConfigDir() (string, error) {
+func configDir() (string, error) {
 	configDir, err := os.UserConfigDir()
 	if err != nil {
 		return "", fmt.Errorf("unable to get config dir: %w", err)
@@ -51,7 +51,7 @@ func ConfigDir() (string, error) {
 	return filepath.Join(configDir, "jellyrpc"), nil
 }
 
-func (cfg *Config) ApplyDefaults(defaultAppID string) {
+func (cfg *Config) applyDefaults(defaultAppID string) {
 	if cfg.PollRate <= 0 {
 		cfg.PollRate = 5
 	}
@@ -65,7 +65,7 @@ func (cfg *Config) ApplyDefaults(defaultAppID string) {
 	}
 }
 
-func (cfg *Config) Validate() ([]string, error) {
+func (cfg *Config) validate() ([]string, error) {
 	var missing []string
 
 	// check all explicity so we can present ALL missing values
@@ -88,7 +88,7 @@ func (cfg *Config) Validate() ([]string, error) {
 	return nil, nil
 }
 
-func LoadValidConfig(cfgPath string) (*Config, error) {
+func loadValidConfig(cfgPath string) (*Config, error) {
 	cfg, unknown, err := loadConfig(cfgPath)
 	if errors.Is(err, os.ErrNotExist) {
 		// TODO prompt to run "jellyrpc setup" as a fix?
@@ -102,9 +102,9 @@ func LoadValidConfig(cfgPath string) (*Config, error) {
 		Warn("unknown config key(s): %s", strings.Join(unknown, ", "))
 	}
 
-	cfg.ApplyDefaults(defaultAppID)
+	cfg.applyDefaults(defaultAppID)
 
-	missing, err := cfg.Validate()
+	missing, err := cfg.validate()
 	if err != nil {
 		return nil, fmt.Errorf("%w: %s", err, strings.Join(missing, ", "))
 	}
