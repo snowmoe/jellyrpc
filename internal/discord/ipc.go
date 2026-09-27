@@ -97,14 +97,19 @@ func DiscoverIPCSocket() (net.Conn, error) {
 }
 
 // NewConn initiates a connection with discords ipc, completes a handshake
-// and returns a pointer to a DiscordConn
+// and returns a pointer to a DiscordConn.
+//
+// version sets the jellyrpc version
 func NewConn(clientID, version string) (*Conn, error) {
 	conn, err := DiscoverIPCSocket()
 	if err != nil {
 		return nil, err
 	}
 
-	dc := &Conn{conn: conn}
+	dc := &Conn{
+		conn:    conn,
+		version: version,
+	}
 
 	// marhshal a json object from our handshake payload struct
 	// using version 1 of rpc, and the clientID passed into this func
