@@ -11,6 +11,7 @@ import (
 	"io/fs"
 	"maps"
 	"os"
+	"os/exec"
 	"os/signal"
 	"path/filepath"
 	"slices"
@@ -53,6 +54,9 @@ func runSetup() error {
 		return err
 	}
 
+	// display banner now to avoid displaying before basic failable steps
+	displayBanner()
+
 	p := NewPrompt(os.Stdin, os.Stdout)
 	ctx := context.Background()
 
@@ -73,6 +77,22 @@ func runSetup() error {
 		return err
 	}
 
+	fmt.Fprintf(p.out, "wrote new config to %s\n", cfgPath)
+
+	if isSystemd() {
+		err := offerService(p)
+		if err != nil {
+			return err
+		}
+	}
+
+	fmt.Fprint(p.out, "\nrunning checks...\n\n")
+
+	err = runCheck()
+	if err != nil {
+		return err
+	}
+
 	fmt.Fprintf(p.out, `
 jellyrpc setup complete
 
@@ -81,8 +101,75 @@ jellyrpc setup complete
 
 `, c.BaseURL, c.UserName)
 
-	fmt.Fprintf(p.out, "wrote new config to %s\n", cfgPath)
 	return nil
+}
+
+// offerService offers to enable and (re)start the systemd unit if installed
+//
+// unlike fan service this starts the jellyrpc daemon
+func offerService(p *Prompt) error {
+	if !hasSystemctl() {
+		// you have systemd, you don't have systemctl in PATH, nice
+		fmt.Fprintln(p.out, "start jellyrpc manually: jellyrpc run")
+		return nil
+	}
+
+	// if the service isnt installed don't even offer
+	if !isServiceInstalled() {
+		fmt.Fprintln(p.out, "systemd unit not installed, double check install instructions")
+		return nil
+	}
+
+	ok, err := p.Bool("enable and start jellyrpc service?", true)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return nil
+	}
+
+	out, err := systemctl("enable", "jellyrpc.service")
+	if err != nil {
+		fmt.Fprintf(p.out, "\n\nerror enabling the systemd service:\n\n%s", out)
+		return fmt.Errorf("enabled service: %w", err)
+	}
+
+	fmt.Fprintln(p.out, "enabled jellyrpc service")
+
+	out, err = systemctl("restart", "jellyrpc.service")
+	if err != nil {
+		fmt.Fprintf(p.out, "\n\nerror restarting the systemd service:\n\n%s", out)
+		return fmt.Errorf("restart service: %w", err)
+	}
+
+	fmt.Fprintln(p.out, "started jellyrpc service")
+
+	return nil
+}
+
+// wraps exec.Command, runs: systemctl --user args...
+func systemctl(args ...string) ([]byte, error) {
+	args = append([]string{"--user"}, args...)
+	return exec.Command("systemctl", args...).CombinedOutput()
+}
+
+// isServiceInstalled checks if the jellyrpc.service unit has been installed
+func isServiceInstalled() bool {
+	_, err := systemctl("cat", "jellyrpc.service")
+	return err == nil
+}
+
+// hasSystemctl checks if systemctl is in PATH
+func hasSystemctl() bool {
+	_, err := exec.LookPath("systemctl")
+	return err == nil
+}
+
+// isSystemd determines if systemd is the init system by
+// checking if /run/systemd/system exists
+func isSystemd() bool {
+	_, err := os.Stat("/run/systemd/system")
+	return err == nil
 }
 
 // authenticate checks if quick connect is enabled, and prompts to setup
