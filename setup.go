@@ -26,6 +26,7 @@ type Prompt struct {
 	out io.Writer
 }
 
+// returns a *Prompt, which wraps the in/out io Reader/Writer
 func NewPrompt(in io.Reader, out io.Writer) *Prompt {
 	return &Prompt{
 		in:  bufio.NewReader(in),
@@ -377,6 +378,8 @@ func (p *Prompt) input(prompt string) (string, error) {
 	return strings.TrimSpace(s), nil
 }
 
+// String prompts for a string input with a default, if the default value
+// is an empty string the input will become required and loop until a value is taken
 func (p *Prompt) String(prompt, def string) (string, error) {
 	defStr := fmt.Sprintf(" [%s]", def)
 	// no def = required
@@ -400,11 +403,14 @@ func (p *Prompt) String(prompt, def string) (string, error) {
 	}
 }
 
+// Bool wraps BoolWithChars with "y" and "n", produces y/N and Y/n depending
+// on the default
 func (p *Prompt) Bool(prompt string, def bool) (bool, error) {
 	return p.BoolWithChars(prompt, def, "y", "n")
 }
 
-// did all this just because I wanted arbitrary y/n chars..
+// BoolWithChars accepts 2 arbitrary strings to use as a boolean input.
+// along with a prompt and default value.
 func (p *Prompt) BoolWithChars(prompt string, def bool, trueChar, falseChar string) (bool, error) {
 	t := strings.ToLower(trueChar)
 	f := strings.ToLower(falseChar)
