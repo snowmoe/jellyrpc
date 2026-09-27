@@ -2,10 +2,13 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"context"
+	_ "embed"
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"maps"
 	"os"
 	"os/signal"
@@ -29,8 +32,17 @@ func NewPrompt(in io.Reader, out io.Writer) *Prompt {
 	}
 }
 
+//go:embed config.example
+var exampleCfg string
+
 func runSetup() error {
 	var (
+		baseCfg = exampleCfg
+
+		// either set from an existing config, or empty if we couldn't find it,
+		// used as the default when asking for jf server url
+		jellyfinURL string
+
 		hasQC bool
 		useQC bool
 	)
@@ -45,12 +57,22 @@ func runSetup() error {
 		return err
 	}
 
-	// attempt to load an existing config and use
-	// the existing url as the default for the url question
-	jellyfinURL := ""
-	cfg, _, err := loadConfig(cfgPath)
-	if err == nil {
-		jellyfinURL = cfg.JellyfinURL
+	// attempt to read an existing config file
+	existing, err := os.ReadFile(cfgPath)
+	switch {
+	case err == nil:
+		// if it exists we attempt to parse it
+		cfg, _, err := parseConfig(bytes.NewReader(existing))
+		if err == nil {
+			// if we parsed okay then set the url from the config
+			jellyfinURL = cfg.JellyfinURL
+		}
+		// overwrite the example config with the existing one regardless
+		baseCfg = string(existing)
+	case errors.Is(err, fs.ErrNotExist):
+		// do nothing, we'll just use the example config
+	default:
+		return err
 	}
 
 	p := NewPrompt(os.Stdin, os.Stdout)
@@ -83,6 +105,7 @@ func runSetup() error {
 			return err
 		}
 
+		// set the client key and name, the url is already set from askServer
 		c.APIKey = auth.Token
 		c.UserName = auth.User.Name
 
@@ -95,6 +118,20 @@ func runSetup() error {
 	} else {
 		return errors.New("key setup not implemented yet")
 	}
+
+	// if we got this far we can just overwrite the url anyway, and if
+	// anything it'll be cleaner, as it's sanitised already
+	newValues := map[string]string{
+		"JELLYFIN_URL":  c.BaseURL,
+		"JELLYFIN_USER": c.UserName,
+		"JELLYFIN_KEY":  c.APIKey,
+	}
+
+	// baseCfg being either the example, or an existing one we loaded
+	newCfg := updateConfig(baseCfg, newValues)
+
+	// zOmfg
+	fmt.Fprintln(p.out, newCfg)
 
 	return nil
 }
