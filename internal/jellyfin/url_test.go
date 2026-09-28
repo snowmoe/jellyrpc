@@ -140,6 +140,25 @@ func TestSanitiseURL(t *testing.T) {
 		{"ip with port", "192.168.1.69:8096", "http://192.168.1.69:8096"},
 		{"lan hostname + no protocol", "nas:8096", "http://nas:8096"},
 		{"tailscale ip + no protocol", "100.101.102.103:8096", "http://100.101.102.103:8096"},
+
+		// reverse proxy subpaths, keep the subpath and bin the web ui junk
+		{"subpath", "https://example.com/jellyfin", "https://example.com/jellyfin"},
+		{"subpath + trailing slash", "https://example.com/jellyfin/", "https://example.com/jellyfin"},
+		{"subpath + double trailing slash", "https://example.com/jellyfin//", "https://example.com/jellyfin"},
+		{"subpath + web ui", "https://example.com/jellyfin/web/#/home", "https://example.com/jellyfin"},
+		{"nested subpath + web ui", "https://example.com/media/jellyfin/web/#/home", "https://example.com/media/jellyfin"},
+		{"subpath + query", "https://example.com/jellyfin/?salmon=trout", "https://example.com/jellyfin"},
+		{"subpath + web ui + query", "https://example.com/jellyfin/web/#/details?id=salmon", "https://example.com/jellyfin"},
+		{"lan hostname + subpath + no protocol", "nas:8096/jellyfin/web/", "http://nas:8096/jellyfin"},
+
+		// old (10.7 and older) web ui urls had index.html in them
+		{"old web ui", "https://jelly.instance/web/index.html#!/home.html", "https://jelly.instance"},
+		{"subpath + old web ui", "https://example.com/jellyfin/web/index.html#!/home.html", "https://example.com/jellyfin"},
+
+		// only cut on a whole /web segment, not anything starting with web
+		{"bare /web", "https://jelly.instance/web", "https://jelly.instance"},
+		{"subpath starting with web", "https://example.com/website", "https://example.com/website"},
+		{"subpath starting with web + web ui", "https://example.com/website/web/#/home", "https://example.com/website"},
 	}
 
 	for _, tc := range tests {

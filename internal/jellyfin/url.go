@@ -67,7 +67,6 @@ func hasSuffixes(s string, suffixes ...string) bool {
 }
 
 // SanitiseURL cleans a url AND guesses the protocol if it's missing
-// TODO parse correctly if jf under a subpath and not at root
 func SanitiseURL(rawURL string) string {
 	u := strings.TrimSpace(rawURL)
 	if u == "" {
@@ -97,8 +96,19 @@ func SanitiseURL(rawURL string) string {
 
 	hostURL := parsed.Scheme + "://" + parsed.Host
 
-	// prolly not needed but fuckit we schizo
-	hostURL = strings.TrimSuffix(hostURL, "/")
+	// append a / if missing so we can match properly on jellyfin web ui path
+	if !strings.HasSuffix(parsed.Path, "/") {
+		parsed.Path += "/"
+	}
 
-	return hostURL
+	// cut anything after /web/ and leave us with whatever was before
+	// will technically cut wrong if someone serves jellyfin UNDER a /web subpath
+	// (their webui url would look like: /web/web/#/home), stupid, and very rare
+	path, _, _ := strings.Cut(parsed.Path, "/web/")
+
+	// append that new path back on, will be empty if jellyfin isn't under a subpath
+	// otherwise it will have the subpath jellyfin is under (guessed)
+	hostURL += path
+
+	return strings.TrimRight(hostURL, "/")
 }
