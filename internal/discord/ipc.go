@@ -11,7 +11,11 @@ import (
 	"os"
 	"path/filepath"
 	"time"
+	"unicode/utf16"
 )
+
+// rpc text fields have a max len of 128 utf16 chars
+const maxFieldLen = 128
 
 // https://docs.discord.com/developers/topics/rpc#rpc-over-ipc
 
@@ -248,6 +252,11 @@ func (dc *Conn) SetPaused(title, titleURL, arturl string) error {
 }
 
 func (dc *Conn) setActivity(activity activity) error {
+	// should eliminate our chances of rpc activity being rejected
+	// from the details or state being too long (or short)
+	activity.Details = fitField(activity.Details)
+	activity.State = fitField(activity.State)
+
 	p := payload{
 		Cmd:   "SET_ACTIVITY",
 		Nonce: "1",
@@ -296,4 +305,51 @@ func (dc *Conn) Close() {
 		dc.conn.Close()
 		dc.conn = nil
 	}
+}
+
+// fitField ensures a string is between 2-128 utf16 chars long.
+//
+// empty strings are returned back empty, single character strings are
+// padded with a zero width char, and strings > 128 (utf16) chars are
+// truncated with an ellipsis appended
+func fitField(s string) string {
+	if s == "" {
+		return ""
+	}
+
+	strLen := utf16Len(s)
+
+	if strLen == 1 {
+		// if a single utf16 char, pad with a zero width
+		// char to avoid rpc rejection
+		return s + "\u200b"
+	}
+	if strLen <= maxFieldLen {
+		// if under 128 then return as within discord limit
+		return s
+	}
+
+	var total int
+	for i, r := range s {
+		// if the current (utf16) len + next rune len would
+		// go past 127 then return what we have + ellipsis
+		if total+utf16.RuneLen(r) > maxFieldLen-1 {
+			return s[:i] + "…"
+		}
+
+		// otherwise add the utf16 rune len to total
+		total += utf16.RuneLen(r)
+	}
+
+	// unreachable but linter doesn't know that
+	return s
+}
+
+// utf16Len returns the utf16 character length of a string
+func utf16Len(s string) (n int) {
+	for _, r := range s {
+		n += utf16.RuneLen(r)
+	}
+
+	return
 }
