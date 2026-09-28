@@ -20,9 +20,16 @@ type Config struct {
 	PollRate      int
 	PauseTimeout  int
 	AppID         string
+	ArtworkSource string
 	UseDBLink     bool
 	UseEpisodeArt bool
 }
+
+const (
+	artAuto     string = "auto"
+	artJellyfin string = "jellyfin"
+	artBridge   string = "bridge"
+)
 
 // accepts the usual truthy spellings so a config isnt silently false on "1" or "yes"
 func parseBool(val string) bool {
@@ -63,6 +70,9 @@ func (cfg *Config) applyDefaults(defaultAppID string) {
 	if cfg.AppID == "" {
 		cfg.AppID = defaultAppID
 	}
+	if cfg.ArtworkSource == "" {
+		cfg.ArtworkSource = artAuto
+	}
 }
 
 func (cfg *Config) validate() ([]string, error) {
@@ -89,7 +99,7 @@ func (cfg *Config) validate() ([]string, error) {
 }
 
 func loadValidConfig(cfgPath string) (*Config, error) {
-	cfg, unknown, err := loadConfig(cfgPath)
+	cfg, warnings, err := loadConfig(cfgPath)
 	if errors.Is(err, os.ErrNotExist) {
 		// TODO prompt to run "jellyrpc setup" as a fix?
 		return nil, fmt.Errorf("file doesn't exist: %s", cfgPath)
@@ -98,8 +108,8 @@ func loadValidConfig(cfgPath string) (*Config, error) {
 		return nil, err
 	}
 
-	if len(unknown) > 0 {
-		Warn("unknown config key(s): %s", strings.Join(unknown, ", "))
+	for _, w := range warnings {
+		Warn("%s", w)
 	}
 
 	cfg.applyDefaults(defaultAppID)
@@ -122,12 +132,18 @@ func loadConfig(path string) (*Config, []string, error) {
 	return parseConfig(file)
 }
 
-// TODO move the unknown keys into a custom config error type
 func parseConfig(r io.Reader) (*Config, []string, error) {
-	var unknown []string
+	var (
+		unknown  []string
+		warnings []string
+	)
 
-	// -1 marks pause timeout as unset so ApplyDefaults can tell it apart from
-	// an explicit 0 which disables the timeout
+	addWarning := func(format string, v ...any) {
+		warnings = append(warnings, fmt.Sprintf(format, v...))
+	}
+
+	// -1 marks pause timeout as unset so applyDefaults
+	// can tell it apart from 0 which disables the timeout
 	cfg := &Config{PauseTimeout: -1}
 	scanner := bufio.NewScanner(r)
 
@@ -156,19 +172,27 @@ func parseConfig(r io.Reader) (*Config, []string, error) {
 		case "POLL_RATE":
 			i, err := strconv.Atoi(val)
 			if err != nil {
-				Warn("failed to set poll rate from config: %v", err)
+				addWarning("invalid POLL_RATE: %q", val)
 				continue
 			}
 			cfg.PollRate = i
 		case "PAUSE_TIMEOUT":
 			i, err := strconv.Atoi(val)
 			if err != nil {
-				Warn("failed to set pause timeout from config: %v", err)
+				addWarning("invalid PAUSE_TIMEOUT: %q", val)
 				continue
 			}
 			cfg.PauseTimeout = i
 		case "APP_ID":
 			cfg.AppID = val
+		case "ARTWORK_SOURCE":
+			val = strings.ToLower(val)
+			switch val {
+			case artAuto, artJellyfin, artBridge:
+				cfg.ArtworkSource = val
+			default:
+				addWarning("invalid ARTWORK_SOURCE %q, using auto", val)
+			}
 		case "DB_LINK":
 			cfg.UseDBLink = parseBool(val)
 		case "USE_EPISODE_ART":
@@ -180,8 +204,12 @@ func parseConfig(r io.Reader) (*Config, []string, error) {
 
 	err := scanner.Err()
 	if err != nil {
-		return nil, unknown, err
+		return nil, nil, err
 	}
 
-	return cfg, unknown, nil
+	if len(unknown) > 0 {
+		addWarning("unknown key(s): %s", strings.Join(unknown, ", "))
+	}
+
+	return cfg, warnings, nil
 }

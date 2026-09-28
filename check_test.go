@@ -215,8 +215,18 @@ func TestCheckConfigFile(t *testing.T) {
 		path := write(t, "unknown", "JELLYFIN_USER=snow\nSALMON=1\nTROUT=2\n")
 
 		r, cfg := checkConfigFile(path)
-		assertResult(t, r, statusWarn, "unknown config key(s): SALMON, TROUT")
+		assertResult(t, r, statusWarn, "unknown key(s): SALMON, TROUT")
 		// a warn still needs to hand the config on to the next checks
+		if cfg == nil || cfg.JellyfinUser != "snow" {
+			t.Errorf("expected config with user snow, got %+v", cfg)
+		}
+	})
+
+	t.Run("multiple warnings", func(t *testing.T) {
+		path := write(t, "warnings", "JELLYFIN_USER=snow\nARTWORK_SOURCE=salmon\nTROUT=1\n")
+
+		r, cfg := checkConfigFile(path)
+		assertResult(t, r, statusWarn, `invalid ARTWORK_SOURCE "salmon", using auto; unknown key(s): TROUT`)
 		if cfg == nil || cfg.JellyfinUser != "snow" {
 			t.Errorf("expected config with user snow, got %+v", cfg)
 		}

@@ -9,6 +9,7 @@ import (
 func TestBuildPresenceEpisode(t *testing.T) {
 	opts := Options{
 		JellyfinURL:   "https://jelly.example.com",
+		Local:         false,
 		UseDBLink:     true,
 		UseEpisodeArt: false,
 	}
@@ -46,20 +47,40 @@ func TestBuildPresenceEpisode(t *testing.T) {
 	}
 }
 
-func TestBuildPresenceLocalArtworkFallback(t *testing.T) {
-	opts := Options{JellyfinURL: "http://192.168.1.10:8096"}
-	sess := &jellyfin.Session{
-		NowPlayingItem: jellyfin.NowPlayingItem{
-			Name:        "Movie",
-			ID:          "movie-id",
-			Type:        "Movie",
-			ProviderIDs: jellyfin.ProviderIDs{Tmdb: "42"},
-		},
+func TestBuildPresenceArtwork(t *testing.T) {
+	const jfURL = "https://jelly.example.com"
+
+	tests := []struct {
+		name     string
+		local    bool
+		ids      jellyfin.ProviderIDs
+		expected string
+	}{
+		{"public uses jellyfin", false, jellyfin.ProviderIDs{Tmdb: "42"}, jfURL + "/Items/movie-id/Images/Primary?fillWidth=400&quality=85"},
+		{"local prefers tmdb", true, jellyfin.ProviderIDs{Tmdb: "42", Imdb: "tt123", Tvdb: "7"}, "https://rot.sh/poster?tmdb=42"},
+		{"local falls back to imdb", true, jellyfin.ProviderIDs{Imdb: "tt123", Tvdb: "7"}, "https://rot.sh/poster?imdb=tt123"},
+		{"local falls back to tvdb", true, jellyfin.ProviderIDs{Tvdb: "7"}, "https://rot.sh/poster?tvdb=7"},
+		{"local with no ids", true, jellyfin.ProviderIDs{}, "jellyfin"},
 	}
 
-	got := Build(opts, sess, 0)
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// the url alone shouldn't decide anything anymore, only Local does
+			opts := Options{JellyfinURL: jfURL, Local: tc.local}
+			sess := &jellyfin.Session{
+				NowPlayingItem: jellyfin.NowPlayingItem{
+					Name:        "Movie",
+					ID:          "movie-id",
+					Type:        "Movie",
+					ProviderIDs: tc.ids,
+				},
+			}
 
-	if got.ArtworkURL != "https://rot.sh/poster?tmdb=42" {
-		t.Fatalf("ArtworkURL = %q", got.ArtworkURL)
+			got := Build(opts, sess, 0)
+
+			if got.ArtworkURL != tc.expected {
+				t.Errorf("\nexpected: %s\ngot:      %s", tc.expected, got.ArtworkURL)
+			}
+		})
 	}
 }

@@ -24,6 +24,7 @@ type Activity struct {
 
 type Options struct {
 	JellyfinURL   string
+	Local         bool
 	UseEpisodeArt bool
 	UseDBLink     bool
 }
@@ -36,7 +37,7 @@ func Build(opts Options, sess *jellyfin.Session, nowMillis int64) Activity {
 	item := sess.NowPlayingItem
 
 	title, state, imageID := mediaDisplay(item, opts.UseEpisodeArt)
-	artworkURL := artworkURLFor(opts.JellyfinURL, imageID, item.ProviderIDs)
+	artworkURL := artworkURLFor(opts, imageID, item.ProviderIDs)
 
 	p := Activity{
 		Title:      title,
@@ -73,8 +74,8 @@ func mediaDisplay(item jellyfin.NowPlayingItem, useEpisodeArt bool) (title, stat
 	return title, state, imageID
 }
 
-func artworkURLFor(jellyfinURL, imageID string, ids jellyfin.ProviderIDs) string {
-	if jellyfin.IsLocalInstance(jellyfinURL) {
+func artworkURLFor(opts Options, imageID string, ids jellyfin.ProviderIDs) string {
+	if opts.Local {
 		if ids.Tmdb != "" {
 			return fmt.Sprintf("%s?tmdb=%s", bridgeAPI, ids.Tmdb)
 		}
@@ -87,7 +88,7 @@ func artworkURLFor(jellyfinURL, imageID string, ids jellyfin.ProviderIDs) string
 		return "jellyfin"
 	}
 
-	return fmt.Sprintf("%s/Items/%s/Images/Primary?fillWidth=400&quality=85", jellyfinURL, imageID)
+	return fmt.Sprintf("%s/Items/%s/Images/Primary?fillWidth=400&quality=85", opts.JellyfinURL, imageID)
 }
 
 func titleURLFor(ids jellyfin.ProviderIDs, enabled bool) string {

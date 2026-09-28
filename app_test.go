@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/snowmoe/jellyrpc/internal/jellyfin"
+	"github.com/snowmoe/jellyrpc/internal/presence"
 )
 
 type fakeSessions struct {
@@ -59,9 +60,10 @@ func TestAppRunUpdatesPresenceAndClosesOnCancel(t *testing.T) {
 
 	app := &App{
 		Config: &Config{
-			JellyfinURL: "https://jelly.example.com",
-			PollRate:    1,
-			AppID:       "app-id",
+			JellyfinURL:   "https://jelly.example.com",
+			PollRate:      1,
+			AppID:         "app-id",
+			ArtworkSource: artJellyfin, // skips the dns lookup
 		},
 		Sessions: &fakeSessions{sess: &jellyfin.Session{
 			NowPlayingItem: jellyfin.NowPlayingItem{
@@ -131,16 +133,17 @@ func TestPollPauseTimeoutClosesSocket(t *testing.T) {
 	}
 
 	var dc PresenceClient
+	opts := presence.Options{JellyfinURL: "https://jelly.example.com"}
 
 	// first poll while paused opens the socket and pushes once
-	app.poll(context.Background(), &dc, now)
+	app.poll(context.Background(), &dc, opts, now)
 	if dc == nil || client.pausedCalls != 1 {
 		t.Fatalf("expected open socket and one paused push, got dc=%v pausedCalls=%d", dc != nil, client.pausedCalls)
 	}
 
 	// advance past the timeout, next poll should drop the socket and stop pushing
 	current = current.Add(2 * time.Minute)
-	app.poll(context.Background(), &dc, now)
+	app.poll(context.Background(), &dc, opts, now)
 	if dc != nil {
 		t.Fatal("socket was not closed after pause timeout")
 	}
@@ -149,5 +152,43 @@ func TestPollPauseTimeoutClosesSocket(t *testing.T) {
 	}
 	if client.pausedCalls != 1 {
 		t.Fatalf("pausedCalls = %d, want 1 (no push after timeout)", client.pausedCalls)
+	}
+}
+
+func TestArtworkSource(t *testing.T) {
+	// only ip literals here so auto never hits dns, the lookup side
+	// gets tested properly in the jellyfin package with a fake resolver
+	const (
+		localURL  = "http://192.168.1.10:8096"
+		publicURL = "https://203.0.113.5"
+	)
+
+	tests := []struct {
+		name      string
+		src       string
+		url       string
+		wantLocal bool
+		wantMsg   string
+	}{
+		{"forced jellyfin on local", artJellyfin, localURL, false, "artwork via jellyfin (config)"},
+		{"forced bridge on public", artBridge, publicURL, true, "artwork via bridge (config)"},
+		{"auto local", artAuto, localURL, true, "artwork via bridge (auto: local instance, set ARTWORK_SOURCE=jellyfin if public)"},
+		{"auto public", artAuto, publicURL, false, "artwork via jellyfin (auto: public instance)"},
+		// anything that skipped applyDefaults should still act like auto
+		{"unset acts as auto", "", localURL, true, "artwork via bridge (auto: local instance, set ARTWORK_SOURCE=jellyfin if public)"},
+		{"garbage acts as auto", "salmon", publicURL, false, "artwork via jellyfin (auto: public instance)"},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			local, msg := artworkSource(tc.src, tc.url)
+
+			if local != tc.wantLocal {
+				t.Errorf("expected local %v, got %v", tc.wantLocal, local)
+			}
+			if msg != tc.wantMsg {
+				t.Errorf("\nexpected: %q\ngot:      %q", tc.wantMsg, msg)
+			}
+		})
 	}
 }

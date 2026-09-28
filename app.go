@@ -67,22 +67,32 @@ func (a *App) run(ctx context.Context) error {
 		}
 	}()
 
+	local, msg := artworkSource(a.Config.ArtworkSource, a.Config.JellyfinURL)
+	Info("%s", msg)
+
+	opts := presence.Options{
+		JellyfinURL:   a.Config.JellyfinURL,
+		Local:         local,
+		UseEpisodeArt: a.Config.UseEpisodeArt,
+		UseDBLink:     a.Config.UseDBLink,
+	}
+
 	// poll once up front so we dont sit idle for a full poll rate on startup
-	a.poll(ctx, &dc, now)
+	a.poll(ctx, &dc, opts, now)
 
 	for {
 		select {
 		case <-ctx.Done():
 			return nil
 		case <-ticker.C():
-			a.poll(ctx, &dc, now)
+			a.poll(ctx, &dc, opts, now)
 		}
 	}
 }
 
 // poll runs a single tick, transient errors are logged and swallowed so the
 // daemon keeps running across jellyfin/discord/network blips instead of dying
-func (a *App) poll(ctx context.Context, dc *PresenceClient, now func() time.Time) {
+func (a *App) poll(ctx context.Context, dc *PresenceClient, opts presence.Options, now func() time.Time) {
 	sess, err := a.Sessions.ActiveSession(ctx)
 	if err != nil {
 		// warn once on the way down, stay quiet until it recovers
@@ -146,11 +156,7 @@ func (a *App) poll(ctx context.Context, dc *PresenceClient, now func() time.Time
 	}
 
 	p := presence.Build(
-		presence.Options{
-			JellyfinURL:   a.Config.JellyfinURL,
-			UseEpisodeArt: a.Config.UseEpisodeArt,
-			UseDBLink:     a.Config.UseDBLink,
-		},
+		opts,
 		sess,
 		now().UnixMilli(),
 	)
@@ -190,6 +196,31 @@ func (a *App) reset(dc *PresenceClient) {
 		(*dc).Close()
 		*dc = nil
 	}
+}
+
+func artworkSource(src, jellyfinURL string) (local bool, msg string) {
+	switch src {
+	case artJellyfin:
+		// force local to false so artwork is attempted from jellyfin
+		local = false
+		msg = "artwork via jellyfin (config)"
+	case artBridge:
+		// force local to true so artwork is fetched via bridge
+		local = true
+		msg = "artwork via bridge (config)"
+	default: // artAuto or unset
+		local = jellyfin.IsLocalInstance(jellyfinURL)
+		if local {
+			// this message is verbose as fuck because I could've done with it myself,
+			// if someone has a public reverse proxy for jellyfin, but on lan they rewrite
+			// the domain to the reverse proxy locally we guess local instance from the lookup
+			msg = "artwork via bridge (auto: local instance, set ARTWORK_SOURCE=jellyfin if public)"
+		} else {
+			msg = "artwork via jellyfin (auto: public instance)"
+		}
+	}
+
+	return
 }
 
 func isSessionActive(sess *jellyfin.Session) bool {

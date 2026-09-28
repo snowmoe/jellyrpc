@@ -328,15 +328,15 @@ func checkHandshake(appID string) result {
 // config
 
 func checkConfigFile(path string) (result, *Config) {
-	cfg, unknown, err := loadConfig(path)
+	cfg, warnings, err := loadConfig(path)
 	if errors.Is(err, os.ErrNotExist) {
 		return fail("config file doesn't exist, try 'jellyrpc setup'"), nil
 	} else if err != nil {
 		return fail(err.Error()), nil
 	}
 
-	if len(unknown) > 0 {
-		msg := fmt.Sprintf("unknown config key(s): %s", strings.Join(unknown, ", "))
+	if len(warnings) > 0 {
+		msg := strings.Join(warnings, "; ")
 		return warn(msg), cfg
 	}
 
