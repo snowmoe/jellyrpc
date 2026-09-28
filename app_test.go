@@ -105,9 +105,10 @@ func TestAppRunUpdatesPresenceAndClosesOnCancel(t *testing.T) {
 		t.Fatal("Run did not exit after context cancellation")
 	}
 
-	// one immediate poll on startup plus one from the ticker
-	if client.watchingCalls != 2 {
-		t.Fatalf("watchingCalls = %d, want 2", client.watchingCalls)
+	// one immediate poll on startup plus one from the ticker, the second
+	// one is identical (clock doesn't move) so it gets skipped
+	if client.watchingCalls != 1 {
+		t.Fatalf("watchingCalls = %d, want 1", client.watchingCalls)
 	}
 	if client.closed != true {
 		t.Fatal("client was not closed")
@@ -159,19 +160,28 @@ func TestPollPauseTimeoutClosesSocket(t *testing.T) {
 	}
 }
 
-// playing gives an unpaused session for id, so poll goes down the SetWatching path
-func playing(id string) *jellyfin.Session {
+// playing gives an unpaused session for name, so poll goes down the SetWatching
+// path. names need to differ between items or the activities look identical
+func playing(name string) *jellyfin.Session {
 	return &jellyfin.Session{
-		NowPlayingItem: jellyfin.NowPlayingItem{Name: "Salmon", ID: id, Type: "Movie", RunTimeTicks: 120 * 10000000},
+		NowPlayingItem: jellyfin.NowPlayingItem{Name: name, ID: name + "-id", Type: "Movie", RunTimeTicks: 120 * 10000000},
 	}
+}
+
+// seconds to jellyfin ticks
+func ticks(d time.Duration) int64 {
+	return int64(d / time.Second * 10000000)
 }
 
 func TestPollRejectedActivity(t *testing.T) {
 	logs := captureLog(t)
 
-	client := &fakePresenceClient{err: &discord.RejectedError{Code: 4000, Message: "salmon"}}
-	sessions := &fakeSessions{sess: playing("salmon-id")}
-	now := func() time.Time { return time.UnixMilli(100000) }
+	rejected := &discord.RejectedError{Code: 4000, Message: "salmon"}
+	client := &fakePresenceClient{err: rejected}
+	sessions := &fakeSessions{sess: playing("Salmon")}
+
+	current := time.UnixMilli(100000)
+	now := func() time.Time { return current }
 
 	app := &App{
 		Config:   &Config{JellyfinURL: "https://jelly.example.com", AppID: "app-id"},
@@ -195,18 +205,25 @@ func TestPollRejectedActivity(t *testing.T) {
 		t.Fatal("rejection shouldn't drop the connection")
 	}
 
-	// same item rejected again, stay quiet (this used to warn every other tick)
+	// same activity again, no point resending something discord already said no to
 	poll()
 	poll()
+	if client.watchingCalls != 1 {
+		t.Errorf("expected rejected activity not to be resent, got %d calls", client.watchingCalls)
+	}
+
+	// the forced resend still retries it, but it's the same item so stay quiet
+	current = current.Add(resendInterval)
+	poll()
+	if client.watchingCalls != 2 {
+		t.Errorf("expected a forced resend after %s, got %d calls", resendInterval, client.watchingCalls)
+	}
 	if warns() != 1 {
 		t.Fatalf("expected still 1 warn, got %d\n%s", warns(), logs)
 	}
-	if client.watchingCalls != 3 {
-		t.Errorf("expected we still try sending every poll, got %d calls", client.watchingCalls)
-	}
 
 	// new item gets its own warn
-	sessions.sess = playing("trout-id")
+	sessions.sess = playing("Trout")
 	poll()
 	if warns() != 2 {
 		t.Fatalf("expected 2 warns after new item, got %d\n%s", warns(), logs)
@@ -214,8 +231,10 @@ func TestPollRejectedActivity(t *testing.T) {
 
 	// a success clears it, so the next rejection on the same item warns again
 	client.err = nil
+	sessions.sess = playing("Cod")
 	poll()
-	client.err = &discord.RejectedError{Code: 4000, Message: "salmon"}
+	client.err = rejected
+	sessions.sess.PlayState.PositionTicks = ticks(time.Minute) // seek so it actually sends
 	poll()
 	if warns() != 3 {
 		t.Fatalf("expected 3 warns after success then reject, got %d\n%s", warns(), logs)
@@ -226,6 +245,99 @@ func TestPollRejectedActivity(t *testing.T) {
 	}
 }
 
+func TestPollSkipsUnchangedActivity(t *testing.T) {
+	client := &fakePresenceClient{}
+	sess := playing("Salmon")
+
+	current := time.UnixMilli(100000)
+	now := func() time.Time { return current }
+
+	sessions := &fakeSessions{sess: sess}
+
+	app := &App{
+		Config:   &Config{JellyfinURL: "https://jelly.example.com", AppID: "app-id"},
+		Sessions: sessions,
+		Connect: func(string) (PresenceClient, error) {
+			return client, nil
+		},
+	}
+
+	var dc PresenceClient
+	opts := presence.Options{JellyfinURL: "https://jelly.example.com"}
+	poll := func() { app.poll(context.Background(), &dc, opts, now) }
+
+	// normal playback, clock and position move together so start stays put
+	play := func(d time.Duration) {
+		current = current.Add(d)
+		sess.PlayState.PositionTicks += ticks(d)
+	}
+
+	expect := func(step string, watching, paused int) {
+		t.Helper()
+		if client.watchingCalls != watching || client.pausedCalls != paused {
+			t.Fatalf("%s: expected %d watching + %d paused, got %d + %d",
+				step, watching, paused, client.watchingCalls, client.pausedCalls)
+		}
+	}
+
+	poll()
+	expect("first poll", 1, 0)
+
+	play(5 * time.Second)
+	poll()
+	play(5 * time.Second)
+	poll()
+	expect("normal playback", 1, 0)
+
+	// jellyfin's position lagging a bit behind the clock, like the rounding wobble
+	current = current.Add(time.Second)
+	poll()
+	expect("small wobble", 1, 0)
+
+	// skip forward 30s
+	sess.PlayState.PositionTicks += ticks(30 * time.Second)
+	poll()
+	expect("seek", 2, 0)
+
+	// nothing changes for a while, still resend so a restarted discord gets it back
+	play(resendInterval)
+	poll()
+	expect("forced resend", 3, 0)
+
+	sess.PlayState.IsPaused = true
+	poll()
+	current = current.Add(10 * time.Second)
+	poll()
+	expect("paused", 3, 1)
+
+	sess.PlayState.IsPaused = false
+	poll()
+	expect("resumed", 4, 1)
+
+	// write fails, socket gets dropped
+	client.err = errors.New("broken pipe")
+	sess.PlayState.PositionTicks += ticks(time.Minute)
+	poll()
+	expect("failed send", 5, 1)
+	if dc != nil {
+		t.Fatal("expected connection dropped after failed send")
+	}
+
+	// fresh socket means discord shows nothing, so the same activity has to go out again
+	client.err = nil
+	poll()
+	expect("after reconnect", 6, 1)
+
+	// jellyfin blips and we drop the socket, then it comes straight back with the
+	// same thing well inside the resend interval, still has to be sent
+	sessions.err = errors.New("salmon")
+	poll()
+	sessions.err = nil
+	play(5 * time.Second)
+	poll()
+	expect("after jellyfin blip", 7, 1)
+}
+
 func TestPollSetErrorResets(t *testing.T) {
 	logs := captureLog(t)
 
@@ -234,7 +346,7 @@ func TestPollSetErrorResets(t *testing.T) {
 
 	app := &App{
 		Config:   &Config{JellyfinURL: "https://jelly.example.com", AppID: "app-id"},
-		Sessions: &fakeSessions{sess: playing("salmon-id")},
+		Sessions: &fakeSessions{sess: playing("Salmon")},
 		Connect: func(string) (PresenceClient, error) {
 			return client, nil
 		},
@@ -252,6 +364,63 @@ func TestPollSetErrorResets(t *testing.T) {
 	}
 	if strings.Contains(logs.String(), "discord rejected activity") {
 		t.Errorf("plain error shouldn't be reported as a rejection:\n%s", logs)
+	}
+}
+
+func TestSameActivity(t *testing.T) {
+	base := presence.Activity{
+		Title:      "Salmon",
+		State:      "S1E2",
+		TitleURL:   "https://title",
+		ArtworkURL: "https://art",
+		StartEpoch: 100000,
+		EndEpoch:   200000,
+	}
+
+	// change copies base and lets each case tweak it
+	change := func(f func(*presence.Activity)) presence.Activity {
+		a := base
+		f(&a)
+		return a
+	}
+	start := func(ms int64) presence.Activity {
+		return change(func(a *presence.Activity) { a.StartEpoch += ms; a.EndEpoch += ms })
+	}
+
+	tests := []struct {
+		name     string
+		b        presence.Activity
+		expected bool
+	}{
+		{"identical", base, true},
+		{"wobble forward", start(1000), true},
+		{"wobble back", start(-1000), true},
+		{"just under tolerance", start(startTolerance - 1), true},
+		// tolerance is exclusive
+		{"at tolerance", start(startTolerance), false},
+		{"seek forward", start(-30000), false},
+		{"seek back", start(30000), false},
+		// only start matters, end follows it anyway
+		{"end moved alone", change(func(a *presence.Activity) { a.EndEpoch += 30000 }), true},
+		{"paused", change(func(a *presence.Activity) { a.Paused = true }), false},
+		{"different title", change(func(a *presence.Activity) { a.Title = "Trout" }), false},
+		{"different state", change(func(a *presence.Activity) { a.State = "S1E3" }), false},
+		{"different art", change(func(a *presence.Activity) { a.ArtworkURL = "https://trout" }), false},
+		{"different link", change(func(a *presence.Activity) { a.TitleURL = "" }), false},
+		// what reset leaves behind, must never match something real
+		{"blank", presence.Activity{}, false},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := sameActivity(base, tc.b); got != tc.expected {
+				t.Errorf("expected %v, got %v", tc.expected, got)
+			}
+			// should be the same whichever way round
+			if got := sameActivity(tc.b, base); got != tc.expected {
+				t.Errorf("reversed: expected %v, got %v", tc.expected, got)
+			}
+		})
 	}
 }
 
