@@ -6,40 +6,75 @@ import (
 	"strings"
 )
 
+// CGNAT range, used by tailscale, and its impossible for a jellyfin
+// instance to have a CGNAT ip AND be public, so it'll flag as local either way
+const cgnatCIDR = "100.64.0.0/10"
+
+// so tests can replace this
+var lookupIP = net.LookupIP
+
 // IsLocalInstance tries to determine if url provided is local
-//
-// checks if localhost or a .local domain, and
-// checks if ip (if parseable) is rfc1918 or loopback
-//
-// still kept 127 and ::1 in the host check anyway but can probably be removed
 func IsLocalInstance(hostURL string) bool {
 	u, err := url.Parse(hostURL)
 	if err != nil {
 		return true
 	}
 
-	host := u.Hostname()
+	host := strings.ToLower(u.Hostname())
 
-	if host == "localhost" || host == "127.0.0.1" || host == "::1" || strings.HasSuffix(host, ".local") {
+	if host == "localhost" || hasSuffixes(host, ".local", ".lan", ".ts.net", ".home.arpa") {
 		return true
 	}
 
+	// ignore the error because if that didn't parse somethings fucked
+	// and it's probably not my fault (i think)
+	_, tsSubnet, _ := net.ParseCIDR(cgnatCIDR)
+
 	ip := net.ParseIP(host)
 	if ip != nil {
-		return ip.IsPrivate() || ip.IsLoopback()
+		return isLocalOrSubnetIP(ip, tsSubnet)
+	}
+
+	addrs, err := lookupIP(host)
+	if err != nil {
+		return false
+	}
+
+	for _, ip := range addrs {
+		// catches if any of the ip's are private, if it has a private AND public
+		// ip it will still get labeled as local
+		if isLocalOrSubnetIP(ip, tsSubnet) {
+			return true
+		}
+	}
+
+	return false
+}
+
+// isLocalOrSubnetIP checks if an ip is a loopback, local (rfc1918), or a 169 (rip dhcp), or in the subnet provided
+func isLocalOrSubnetIP(ip net.IP, sub *net.IPNet) bool {
+	return ip.IsPrivate() || ip.IsLoopback() || ip.IsLinkLocalUnicast() || sub.Contains(ip)
+}
+
+func hasSuffixes(s string, suffixes ...string) bool {
+	for _, suffix := range suffixes {
+		if strings.HasSuffix(s, suffix) {
+			return true
+		}
 	}
 
 	return false
 }
 
 // SanitiseURL cleans a url AND guesses the protocol if it's missing
+// TODO parse correctly if jf under a subpath and not at root
 func SanitiseURL(rawURL string) string {
 	u := strings.TrimSpace(rawURL)
 	if u == "" {
 		return ""
 	}
 
-	// should catch if a user didn't READ THE README(!!!!) and missed the protocol
+	// should catch if a url was supplied without the protocol
 	if !strings.HasPrefix(u, "http://") && !strings.HasPrefix(u, "https://") {
 		// then so the local instance func doesn't err from url.Parse with a missing protocol
 		// just append http:// temporarily so that can parse n do it's thang
@@ -49,7 +84,7 @@ func SanitiseURL(rawURL string) string {
 		if IsLocalInstance(tempURL) {
 			u = "http://" + u
 		} else {
-			// if not local (ie almost 100% likely a domain being used) then we guess it'll be https://
+			// if not local we guess it'll be https://
 			u = "https://" + u
 		}
 	}
