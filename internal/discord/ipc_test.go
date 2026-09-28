@@ -3,6 +3,7 @@ package discord
 import (
 	"encoding/binary"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -348,5 +349,111 @@ func TestCloseTwice(t *testing.T) {
 
 	if dc.conn != nil {
 		t.Error("expected conn to be nil after close")
+	}
+}
+
+// replyWith gives a Conn over a pipe, the other end reads one frame
+// and sends back op + body like discord would after a SET_ACTIVITY
+func replyWith(t *testing.T, op uint32, body string) *Conn {
+	t.Helper()
+
+	client, server := net.Pipe()
+	t.Cleanup(func() { server.Close() })
+
+	go func() {
+		if _, err := readTestFrame(server); err != nil {
+			return
+		}
+		writeTestFrame(server, op, []byte(body))
+	}()
+
+	dc := &Conn{conn: client, version: "v1.2.3"}
+	t.Cleanup(dc.Close)
+
+	return dc
+}
+
+func TestSetActivityReply(t *testing.T) {
+	// roughly what discord sends back when a field fails validation
+	const rejected = `{"cmd":"SET_ACTIVITY","evt":"ERROR","nonce":"1","data":{"code":4000,"message":"child \"activity\" fails because [child \"details\" fails because [\"details\" length must be at least 2 characters long]]"}}`
+
+	t.Run("accepted", func(t *testing.T) {
+		// discord echoes the activity back in data on success
+		dc := replyWith(t, 1, `{"cmd":"SET_ACTIVITY","evt":null,"nonce":"1","data":{"details":"Salmon","state":"S1E2"}}`)
+
+		err := dc.SetWatching("Salmon", "S1E2", "", "", 0, 0)
+		if err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+	})
+
+	t.Run("accepted null data", func(t *testing.T) {
+		// clearing the activity gets a null data back
+		dc := replyWith(t, 1, `{"cmd":"SET_ACTIVITY","evt":null,"nonce":"1","data":null}`)
+
+		err := dc.SetWatching("", "", "", "", 0, 0)
+		if err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+	})
+
+	t.Run("rejected", func(t *testing.T) {
+		dc := replyWith(t, 1, rejected)
+
+		err := dc.SetWatching("S", "S1E2", "", "", 0, 0)
+
+		rejErr, ok := errors.AsType[*RejectedError](err)
+		if !ok {
+			t.Fatalf("expected a RejectedError, got: %v", err)
+		}
+		if rejErr.Code != 4000 {
+			t.Errorf("expected code 4000, got %d", rejErr.Code)
+		}
+		if !strings.Contains(rejErr.Message, "at least 2 characters") {
+			t.Errorf("expected discord's message, got %q", rejErr.Message)
+		}
+	})
+
+	t.Run("rejected while paused", func(t *testing.T) {
+		dc := replyWith(t, 1, rejected)
+
+		err := dc.SetPaused("S", "", "")
+		if _, ok := errors.AsType[*RejectedError](err); !ok {
+			t.Errorf("expected a RejectedError, got: %v", err)
+		}
+	})
+
+	t.Run("close frame", func(t *testing.T) {
+		// this one's a dead connection, so it shouldn't look like a rejection
+		dc := replyWith(t, 2, `{"code":4000,"message":"salmon"}`)
+
+		err := dc.SetWatching("Salmon", "S1E2", "", "", 0, 0)
+		if err == nil {
+			t.Fatal("expected error, got nil")
+		}
+		if _, ok := errors.AsType[*RejectedError](err); ok {
+			t.Errorf("close frame shouldn't be a RejectedError: %v", err)
+		}
+	})
+
+	t.Run("garbage reply", func(t *testing.T) {
+		dc := replyWith(t, 1, "trout")
+
+		err := dc.SetWatching("Salmon", "S1E2", "", "", 0, 0)
+		if err == nil {
+			t.Fatal("expected error, got nil")
+		}
+		if _, ok := errors.AsType[*RejectedError](err); ok {
+			t.Errorf("bad json shouldn't be a RejectedError: %v", err)
+		}
+	})
+}
+
+func TestRejectedErrorMessage(t *testing.T) {
+	err := &RejectedError{Code: 4000, Message: "salmon"}
+
+	want := "discord rejected activity: salmon (code 4000)"
+	if err.Error() != want {
+		t.Errorf("\nexpected: %q\ngot:      %q", want, err.Error())
 	}
 }

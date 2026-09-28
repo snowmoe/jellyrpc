@@ -2,9 +2,12 @@ package main
 
 import (
 	"context"
+	"errors"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/snowmoe/jellyrpc/internal/discord"
 	"github.com/snowmoe/jellyrpc/internal/jellyfin"
 	"github.com/snowmoe/jellyrpc/internal/presence"
 )
@@ -22,16 +25,17 @@ type fakePresenceClient struct {
 	watchingCalls int
 	pausedCalls   int
 	closed        bool
+	err           error // returned from every set, nil unless a test wants a failure
 }
 
 func (f *fakePresenceClient) SetWatching(title, status, titleURL, arturl string, startEpoch, endEpoch int64) error {
 	f.watchingCalls++
-	return nil
+	return f.err
 }
 
 func (f *fakePresenceClient) SetPaused(title, titleURL, arturl string) error {
 	f.pausedCalls++
-	return nil
+	return f.err
 }
 
 func (f *fakePresenceClient) Close() {
@@ -152,6 +156,102 @@ func TestPollPauseTimeoutClosesSocket(t *testing.T) {
 	}
 	if client.pausedCalls != 1 {
 		t.Fatalf("pausedCalls = %d, want 1 (no push after timeout)", client.pausedCalls)
+	}
+}
+
+// playing gives an unpaused session for id, so poll goes down the SetWatching path
+func playing(id string) *jellyfin.Session {
+	return &jellyfin.Session{
+		NowPlayingItem: jellyfin.NowPlayingItem{Name: "Salmon", ID: id, Type: "Movie", RunTimeTicks: 120 * 10000000},
+	}
+}
+
+func TestPollRejectedActivity(t *testing.T) {
+	logs := captureLog(t)
+
+	client := &fakePresenceClient{err: &discord.RejectedError{Code: 4000, Message: "salmon"}}
+	sessions := &fakeSessions{sess: playing("salmon-id")}
+	now := func() time.Time { return time.UnixMilli(100000) }
+
+	app := &App{
+		Config:   &Config{JellyfinURL: "https://jelly.example.com", AppID: "app-id"},
+		Sessions: sessions,
+		Connect: func(string) (PresenceClient, error) {
+			return client, nil
+		},
+	}
+
+	var dc PresenceClient
+	opts := presence.Options{JellyfinURL: "https://jelly.example.com"}
+	poll := func() { app.poll(context.Background(), &dc, opts, now) }
+	warns := func() int { return strings.Count(logs.String(), "discord rejected activity") }
+
+	// first rejection warns, but the socket is fine so we keep it
+	poll()
+	if warns() != 1 {
+		t.Fatalf("expected 1 warn, got %d\n%s", warns(), logs)
+	}
+	if dc == nil || client.closed {
+		t.Fatal("rejection shouldn't drop the connection")
+	}
+
+	// same item rejected again, stay quiet (this used to warn every other tick)
+	poll()
+	poll()
+	if warns() != 1 {
+		t.Fatalf("expected still 1 warn, got %d\n%s", warns(), logs)
+	}
+	if client.watchingCalls != 3 {
+		t.Errorf("expected we still try sending every poll, got %d calls", client.watchingCalls)
+	}
+
+	// new item gets its own warn
+	sessions.sess = playing("trout-id")
+	poll()
+	if warns() != 2 {
+		t.Fatalf("expected 2 warns after new item, got %d\n%s", warns(), logs)
+	}
+
+	// a success clears it, so the next rejection on the same item warns again
+	client.err = nil
+	poll()
+	client.err = &discord.RejectedError{Code: 4000, Message: "salmon"}
+	poll()
+	if warns() != 3 {
+		t.Fatalf("expected 3 warns after success then reject, got %d\n%s", warns(), logs)
+	}
+
+	if dc == nil || client.closed {
+		t.Error("connection should have survived all of that")
+	}
+}
+
+func TestPollSetErrorResets(t *testing.T) {
+	logs := captureLog(t)
+
+	// any error that isn't a rejection means the socket's dead
+	client := &fakePresenceClient{err: errors.New("broken pipe")}
+
+	app := &App{
+		Config:   &Config{JellyfinURL: "https://jelly.example.com", AppID: "app-id"},
+		Sessions: &fakeSessions{sess: playing("salmon-id")},
+		Connect: func(string) (PresenceClient, error) {
+			return client, nil
+		},
+	}
+
+	var dc PresenceClient
+	opts := presence.Options{JellyfinURL: "https://jelly.example.com"}
+	app.poll(context.Background(), &dc, opts, func() time.Time { return time.UnixMilli(100000) })
+
+	if dc != nil || !client.closed {
+		t.Fatal("expected the connection to be dropped so the next tick reconnects")
+	}
+	if !strings.Contains(logs.String(), "failed to update discord status: broken pipe") {
+		t.Errorf("expected a warn about the failed update, got:\n%s", logs)
+	}
+	if strings.Contains(logs.String(), "discord rejected activity") {
+		t.Errorf("plain error shouldn't be reported as a rejection:\n%s", logs)
 	}
 }
 
