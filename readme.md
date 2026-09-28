@@ -114,7 +114,8 @@ you can then just use this token in `jellyrpc setup` or for the `JELLYFIN_KEY` o
 |`POLL_RATE`| 5 | how often the daemon will poll in seconds
 |`PAUSE_TIMEOUT`| 10 | number of minutes idle before stopping rpc (0 = disabled)
 |`APP_ID`| *see main.go* | discord app id to use for rpc
-|`DB_LINK`| false | use rpc title as a link to imdb/tvdb for the episode
+|`ARTWORK_SOURCE`| auto | override artwork source for rpc (`jellyfin` or `bridge`)
+|`DB_LINK`| false | use rpc title as a link to imdb/tvdb for the episode/movie
 |`USE_EPISODE_ART`| false | prefer using per episode cover art (for series')
 
 *required
