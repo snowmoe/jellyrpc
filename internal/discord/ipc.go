@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -57,6 +58,25 @@ type assets struct {
 type timestamps struct {
 	Start int64 `json:"start,omitempty"`
 	End   int64 `json:"end,omitempty"`
+}
+
+// reply frame
+type reply struct {
+	Event string `json:"evt"`
+	Data  struct {
+		Code    int    `json:"code"`
+		Message string `json:"message"`
+	} `json:"data"`
+}
+
+// RejectedError wraps an "ERROR" event response from a discord client
+type RejectedError struct {
+	Code    int
+	Message string
+}
+
+func (e *RejectedError) Error() string {
+	return fmt.Sprintf("discord rejected activity: %s (code %d)", e.Message, e.Code)
 }
 
 // Conn wraps a net.Conn and a version string, used for rpc methods
@@ -244,10 +264,28 @@ func (dc *Conn) setActivity(activity activity) error {
 		return err
 	}
 
-	// discord replies to every frame, drain it so the socket buffer doesnt
-	// fill up and stall writes over a long running session
-	_, _, err = dc.readFrame()
-	return err
+	// the read frame reply so we can check the opcode and/or message
+	opcode, body, err := dc.readFrame()
+	if err != nil {
+		return err
+	}
+
+	if opcode == 2 {
+		// TODO unmarshal message after and return
+		// so we know why it closed the connection
+		return errors.New("discord closed the rpc connection")
+	}
+
+	var resp reply
+	if err := json.Unmarshal(body, &resp); err != nil {
+		return err
+	}
+
+	if resp.Event == "ERROR" {
+		return &RejectedError{Code: resp.Data.Code, Message: resp.Data.Message}
+	}
+
+	return nil
 }
 
 // Close closes the underlying net.Conn socket without sending an

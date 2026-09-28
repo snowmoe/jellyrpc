@@ -2,8 +2,10 @@ package main
 
 import (
 	"context"
+	"errors"
 	"time"
 
+	"github.com/snowmoe/jellyrpc/internal/discord"
 	"github.com/snowmoe/jellyrpc/internal/jellyfin"
 	"github.com/snowmoe/jellyrpc/internal/presence"
 )
@@ -41,8 +43,11 @@ type App struct {
 	Now         func() time.Time
 	lastPlaying string
 	pausedSince time.Time
-	sessionDown bool // whether the last jellyfin fetch failed, gates repeat warns
-	discordDown bool // whether the last discord connect failed, gates repeat warns
+
+	// states to gate repeated warns
+	sessionDown bool // last jellyfin fetch failed
+	discordDown bool // last discord connect failed
+	rpcRejected bool // last rpc set activity was rejected
 }
 
 func (a *App) run(ctx context.Context) error {
@@ -163,7 +168,11 @@ func (a *App) poll(ctx context.Context, dc *PresenceClient, opts presence.Option
 
 	if a.lastPlaying != sess.NowPlayingItem.ID {
 		a.lastPlaying = sess.NowPlayingItem.ID
+		// log new item playing
 		Info("active playing: %s, id: %s", sess.NowPlayingItem.Name, sess.NowPlayingItem.ID)
+
+		// clear rpc rejection state
+		a.rpcRejected = false
 
 		if a.Config.UseDBLink && p.TitleURL == "" {
 			Warn("unable to find db link for active media")
@@ -184,11 +193,22 @@ func (a *App) poll(ctx context.Context, dc *PresenceClient, opts presence.Option
 		)
 	}
 
-	// drop the connection on write failure so the next tick reconnects
+	rejErr, ok := errors.AsType[*discord.RejectedError](setErr)
+	if ok {
+		if !a.rpcRejected {
+			Warn("%s", rejErr)
+			a.rpcRejected = true
+		}
+		return
+	}
+
 	if setErr != nil {
+		// drop the connection on write failure so the next tick reconnects
 		Warn("failed to update discord status: %v", setErr)
 		a.reset(dc)
 	}
+
+	a.rpcRejected = false
 }
 
 func (a *App) reset(dc *PresenceClient) {
