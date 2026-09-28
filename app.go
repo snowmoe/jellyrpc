@@ -10,6 +10,13 @@ import (
 	"github.com/snowmoe/jellyrpc/internal/presence"
 )
 
+// ms, jf epochs are unix millis
+const startTolerance int64 = 5_000
+
+// interval to resend rpc even if activity hasn't changed
+// so we notice if discord restarted
+const resendInterval = 60 * time.Second
+
 type SessionProvider interface {
 	ActiveSession(ctx context.Context) (*jellyfin.Session, error)
 }
@@ -43,6 +50,10 @@ type App struct {
 	Now         func() time.Time
 	lastPlaying string
 	pausedSince time.Time
+
+	// so we can gate presence updates
+	lastSent   presence.Activity
+	lastSentAt time.Time
 
 	// states to gate repeated warns
 	sessionDown bool // last jellyfin fetch failed
@@ -179,6 +190,10 @@ func (a *App) poll(ctx context.Context, dc *PresenceClient, opts presence.Option
 		}
 	}
 
+	if sameActivity(p, a.lastSent) && now().Sub(a.lastSentAt) < resendInterval {
+		return
+	}
+
 	var setErr error
 	if p.Paused {
 		setErr = (*dc).SetPaused(p.Title, p.TitleURL, p.ArtworkURL)
@@ -199,6 +214,8 @@ func (a *App) poll(ctx context.Context, dc *PresenceClient, opts presence.Option
 			Warn("%s", rejErr)
 			a.rpcRejected = true
 		}
+		a.lastSent = p
+		a.lastSentAt = now()
 		return
 	}
 
@@ -206,8 +223,12 @@ func (a *App) poll(ctx context.Context, dc *PresenceClient, opts presence.Option
 		// drop the connection on write failure so the next tick reconnects
 		Warn("failed to update discord status: %v", setErr)
 		a.reset(dc)
+		return
 	}
 
+	// set the last send activity and rpcRejected state
+	a.lastSent = p
+	a.lastSentAt = now()
 	a.rpcRejected = false
 }
 
@@ -216,6 +237,26 @@ func (a *App) reset(dc *PresenceClient) {
 		(*dc).Close()
 		*dc = nil
 	}
+
+	// reset the lastSent activity
+	a.lastSent = presence.Activity{}
+}
+
+func sameActivity(a, b presence.Activity) bool {
+	diff := a.StartEpoch - b.StartEpoch
+
+	// abs the diff
+	if diff < 0 {
+		diff = -diff
+	}
+
+	// 0 the epochs to compare the other struct fields
+	a.StartEpoch, b.StartEpoch = 0, 0
+	a.EndEpoch, b.EndEpoch = 0, 0
+
+	// only considered the same if fields match and epoch difference
+	// is less than the tolerance
+	return a == b && diff < startTolerance
 }
 
 func artworkSource(src, jellyfinURL string) (local bool, msg string) {
