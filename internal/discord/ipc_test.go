@@ -12,6 +12,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 )
 
 type frame struct {
@@ -287,6 +288,35 @@ func TestSetActivity(t *testing.T) {
 			t.Errorf("expected version in large text, got %+v", a.Assets)
 		}
 	})
+
+	t.Run("long fields truncated", func(t *testing.T) {
+		long := strings.Repeat("salmon ", 30)
+
+		err := dc.SetWatching(long, long, "", "", 0, 0)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		a := decodeActivity(t, nextFrame(t, frames))
+		for name, got := range map[string]string{"details": a.Details, "state": a.State} {
+			if utf16Len(got) > maxFieldLen || !strings.HasSuffix(got, "…") {
+				t.Errorf("expected %s cut to %d with an ellipsis, got %d: %q", name, maxFieldLen, utf16Len(got), got)
+			}
+		}
+	})
+
+	t.Run("one char title padded", func(t *testing.T) {
+		// films like "M" or "9" would get rejected otherwise
+		err := dc.SetPaused("M", "", "")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		a := decodeActivity(t, nextFrame(t, frames))
+		if a.Details != "M\u200b" {
+			t.Errorf("expected padded title, got %q", a.Details)
+		}
+	})
 }
 
 func TestSendFrame(t *testing.T) {
@@ -455,5 +485,72 @@ func TestRejectedErrorMessage(t *testing.T) {
 	want := "discord rejected activity: salmon (code 4000)"
 	if err.Error() != want {
 		t.Errorf("\nexpected: %q\ngot:      %q", want, err.Error())
+	}
+}
+
+func TestUTF16Len(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected int
+	}{
+		{"empty", "", 0},
+		{"ascii", "Salmon", 6},
+		// it's true
+		{"japanese", "猫娘が大好きです", 8},
+		{"emoji", "🐟🐟", 4},
+		{"zero width space", "\u200b", 1},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := utf16Len(tc.input); got != tc.expected {
+				t.Errorf("expected %d, got %d", tc.expected, got)
+			}
+		})
+	}
+}
+
+func TestFitField(t *testing.T) {
+	a := func(n int) string { return strings.Repeat("a", n) }
+	fish := func(n int) string { return strings.Repeat("🐟", n) }
+	titan := func(n int) string { return strings.Repeat("巨", n) }
+
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		// clearing the activity sends empty fields, they need to stay empty
+		{"empty", "", ""},
+		{"one char padded", "M", "M\u200b"},
+		// one emoji is already 2 units so it's fine as is
+		{"one emoji not padded", "🐟", "🐟"},
+		{"two chars", "Up", "Up"},
+		{"exactly max", a(128), a(128)},
+		{"one over max", a(129), a(127) + "…"},
+		{"long japanese", titan(200), titan(127) + "…"},
+		{"emoji exactly max", fish(64), fish(64)},
+		// 63 fish is 126, another would be 128, so cut there and add the ellipsis
+		{"emoji over max", fish(65), fish(63) + "…"},
+		// a + 63 fish is 127, the next fish would go over so it lands on 128 with the ellipsis
+		{"emoji cut on odd boundary", "a" + fish(64), "a" + fish(63) + "…"},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := fitField(tc.input)
+			if got != tc.expected {
+				t.Errorf("\nexpected: %q (%d)\ngot:      %q (%d)", tc.expected, utf16Len(tc.expected), got, utf16Len(got))
+			}
+
+			// whatever happens it should never break a character in half
+			if !utf8.ValidString(got) {
+				t.Errorf("got invalid utf8: %q", got)
+			}
+			if got != "" && (utf16Len(got) < 2 || utf16Len(got) > maxFieldLen) {
+				t.Errorf("expected 2-%d units, got %d", maxFieldLen, utf16Len(got))
+			}
+		})
 	}
 }
