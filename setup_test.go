@@ -131,12 +131,16 @@ JELLYFIN_KEY=abc123
 JELLYFIN_USER=snow
 
 # optional values, uncomment to use
-# !! see readme for more info
-# POLL_RATE=
-# PAUSE_TIMEOUT=
+# see readme for more info!!
+
+# POLL_RATE=5
+# PAUSE_TIMEOUT=10
+
+# ARTWORK_SOURCE=auto
+
+# DB_LINK=false
+# USE_EPISODE_ART=false
 # APP_ID=
-# DB_LINK=
-# USE_EPISODE_ART=
 
 `
 
