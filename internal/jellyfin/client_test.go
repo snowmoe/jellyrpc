@@ -262,3 +262,20 @@ func TestAuthenticateQC(t *testing.T) {
 		t.Errorf("expected snow/trout, got %s/%s", auth.User.Name, auth.Token)
 	}
 }
+
+func TestItemProviderIDs(t *testing.T) {
+	c := newTestClient(t, "salmon", func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/Items/series-id" {
+			t.Errorf("unexpected path: %s", r.URL.Path)
+		}
+		w.Write([]byte(`{"Name":"Haruhi","ProviderIds":{"Tvdb":"79414","Imdb":"tt0816407"}}`))
+	})
+
+	ids, err := c.ItemProviderIDs(context.Background(), "series-id")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if ids.Tvdb != "79414" || ids.Imdb != "tt0816407" || ids.Tmdb != "" {
+		t.Errorf("unexpected ids: %+v", ids)
+	}
+}

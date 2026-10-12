@@ -21,6 +21,11 @@ type SessionProvider interface {
 	ActiveSession(ctx context.Context) (*jellyfin.Session, error)
 }
 
+// ItemLookup fetches provider ids for an item, used to get series ids
+type ItemLookup interface {
+	ItemProviderIDs(ctx context.Context, id string) (jellyfin.ProviderIDs, error)
+}
+
 type PresenceClient interface {
 	SetWatching(title, status, titleURL, arturl string, startEpoch, endEpoch int64) error
 	SetPaused(title, titleURL, arturl string) error
@@ -45,11 +50,17 @@ func (t realTicker) C() <-chan time.Time {
 type App struct {
 	Config      *Config
 	Sessions    SessionProvider
+	Items       ItemLookup // optional, without it no series ids are sent to the bridge
 	Connect     PresenceConnector
 	NewTicker   func(time.Duration) Ticker
 	Now         func() time.Time
 	lastPlaying string
 	pausedSince time.Time
+
+	// series ids for the current episode's series, only refetched
+	// when the series changes
+	seriesID  string
+	seriesIDs jellyfin.ProviderIDs
 
 	// so we can gate presence updates
 	lastSent   presence.Activity
@@ -174,6 +185,7 @@ func (a *App) poll(ctx context.Context, dc *PresenceClient, opts presence.Option
 	p := presence.Build(
 		opts,
 		sess,
+		a.seriesProviderIDs(ctx, opts, &sess.NowPlayingItem),
 		now().UnixMilli(),
 	)
 
@@ -230,6 +242,30 @@ func (a *App) poll(ctx context.Context, dc *PresenceClient, opts presence.Option
 	a.lastSent = p
 	a.lastSentAt = now()
 	a.rpcRejected = false
+}
+
+// seriesProviderIDs returns the provider ids of the playing episode's series,
+// only needed (and fetched) when artwork comes from the bridge. a failed
+// lookup gives empty ids so the bridge falls back to the episode ids
+func (a *App) seriesProviderIDs(ctx context.Context, opts presence.Options, item *jellyfin.NowPlayingItem) jellyfin.ProviderIDs {
+	if a.Items == nil || !opts.Local || item.Type != "Episode" || item.SeriesId == "" {
+		return jellyfin.ProviderIDs{}
+	}
+	if item.SeriesId == a.seriesID {
+		return a.seriesIDs
+	}
+
+	// failures are kept as empty ids too, so it's only retried once the
+	// series changes rather than every poll (e.g. jellyfin older than 10.9)
+	ids, err := a.Items.ItemProviderIDs(ctx, item.SeriesId)
+	if err != nil {
+		Warn("failed to fetch series provider ids: %v", err)
+		ids = jellyfin.ProviderIDs{}
+	}
+
+	a.seriesID = item.SeriesId
+	a.seriesIDs = ids
+	return ids
 }
 
 func (a *App) reset(dc *PresenceClient) {
