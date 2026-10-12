@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
 	"time"
@@ -164,6 +165,19 @@ func (c *Client) ActiveSession(ctx context.Context) (*Session, error) {
 		}
 	}
 	return &Session{}, nil
+}
+
+// ItemProviderIDs gets /Items/{id} and returns the provider ids for that
+// item, used to get the series ids for an episode (jellyfin 10.9+)
+func (c *Client) ItemProviderIDs(ctx context.Context, id string) (ProviderIDs, error) {
+	var item Item
+
+	err := c.do(ctx, "GET", "/Items/"+url.PathEscape(id), nil, &item)
+	if err != nil {
+		return ProviderIDs{}, err
+	}
+
+	return item.ProviderIDs, nil
 }
 
 // PublicSystemInfo gets /System/Info/Public and returns a SystemInfo

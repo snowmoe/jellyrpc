@@ -31,6 +31,12 @@ type ProviderIDs struct {
 	Tvdb string `json:"Tvdb"`
 }
 
+// /Items/{id}, only the fields we need
+// https://api.jellyfin.org/#tag/UserLibrary/operation/GetItem
+type Item struct {
+	ProviderIDs `json:"ProviderIds"`
+}
+
 // /System/Info/Public
 // https://api.jellyfin.org/#tag/System/operation/GetPublicSystemInfo
 type SystemInfo struct {
