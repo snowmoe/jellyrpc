@@ -140,6 +140,7 @@ func run() error {
 	app := &App{
 		Config:   cfg,
 		Sessions: client,
+		Items:    client,
 		Connect: func(clientID string) (PresenceClient, error) {
 			return discord.NewConn(clientID, gitVersion)
 		},

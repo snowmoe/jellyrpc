@@ -25,16 +25,19 @@ type fakePresenceClient struct {
 	watchingCalls int
 	pausedCalls   int
 	closed        bool
+	lastArt       string
 	err           error // returned from every set, nil unless a test wants a failure
 }
 
 func (f *fakePresenceClient) SetWatching(title, status, titleURL, arturl string, startEpoch, endEpoch int64) error {
 	f.watchingCalls++
+	f.lastArt = arturl
 	return f.err
 }
 
 func (f *fakePresenceClient) SetPaused(title, titleURL, arturl string) error {
 	f.pausedCalls++
+	f.lastArt = arturl
 	return f.err
 }
 
@@ -460,4 +463,97 @@ func TestArtworkSource(t *testing.T) {
 			}
 		})
 	}
+}
+
+type fakeItems struct {
+	ids   jellyfin.ProviderIDs
+	err   error
+	calls int
+}
+
+func (f *fakeItems) ItemProviderIDs(context.Context, string) (jellyfin.ProviderIDs, error) {
+	f.calls++
+	return f.ids, f.err
+}
+
+func TestPollSeriesProviderIDs(t *testing.T) {
+	captureLog(t)
+
+	episode := func(seriesID string) *jellyfin.Session {
+		return &jellyfin.Session{
+			NowPlayingItem: jellyfin.NowPlayingItem{
+				Name: "Episode", ID: "ep-" + seriesID, Type: "Episode", SeriesId: seriesID,
+				RunTimeTicks: 120 * 10000000,
+			},
+		}
+	}
+
+	t.Run("fetched once per series and sent to bridge", func(t *testing.T) {
+		client := &fakePresenceClient{}
+		items := &fakeItems{ids: jellyfin.ProviderIDs{Tvdb: "79414"}}
+		sessions := &fakeSessions{sess: episode("haruhi")}
+		app := &App{
+			Config:   &Config{AppID: "app-id"},
+			Sessions: sessions,
+			Items:    items,
+			Connect:  func(string) (PresenceClient, error) { return client, nil },
+		}
+
+		var dc PresenceClient
+		opts := presence.Options{Local: true}
+		poll := func() { app.poll(context.Background(), &dc, opts, time.Now) }
+
+		poll()
+		poll()
+		if items.calls != 1 {
+			t.Fatalf("expected 1 lookup, got %d", items.calls)
+		}
+		if !strings.Contains(client.lastArt, "series_tvdb=79414") {
+			t.Errorf("expected series id in artwork url, got %q", client.lastArt)
+		}
+
+		sessions.sess = episode("other")
+		poll()
+		if items.calls != 2 {
+			t.Fatalf("expected new series to trigger lookup, got %d calls", items.calls)
+		}
+	})
+
+	t.Run("failure not retried every poll", func(t *testing.T) {
+		client := &fakePresenceClient{}
+		items := &fakeItems{err: errors.New("404")}
+		app := &App{
+			Config:   &Config{AppID: "app-id"},
+			Sessions: &fakeSessions{sess: episode("haruhi")},
+			Items:    items,
+			Connect:  func(string) (PresenceClient, error) { return client, nil },
+		}
+
+		var dc PresenceClient
+		opts := presence.Options{Local: true}
+		app.poll(context.Background(), &dc, opts, time.Now)
+		app.poll(context.Background(), &dc, opts, time.Now)
+		if items.calls != 1 {
+			t.Fatalf("expected 1 lookup, got %d", items.calls)
+		}
+		if client.lastArt != "jellyfin" {
+			t.Errorf("expected jellyfin fallback, got %q", client.lastArt)
+		}
+	})
+
+	t.Run("not fetched for jellyfin artwork", func(t *testing.T) {
+		items := &fakeItems{}
+		app := &App{
+			Config:   &Config{AppID: "app-id"},
+			Sessions: &fakeSessions{sess: episode("haruhi")},
+			Items:    items,
+			Connect:  func(string) (PresenceClient, error) { return &fakePresenceClient{}, nil },
+		}
+
+		var dc PresenceClient
+		app.poll(context.Background(), &dc, presence.Options{}, time.Now)
+		if items.calls != 0 {
+			t.Fatalf("expected no lookup, got %d", items.calls)
+		}
+	})
 }

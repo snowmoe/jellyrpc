@@ -2,6 +2,7 @@ package presence
 
 import (
 	"fmt"
+	"net/url"
 
 	"github.com/snowmoe/jellyrpc/internal/jellyfin"
 )
@@ -30,14 +31,15 @@ type Options struct {
 }
 
 // Build takes a set of options (derived from config), a jellyfin Session,
-// and the current unix time. building and returning an rpc Activity based on
-// the set options, the current jellyfin session, and the progress bar
+// the provider ids of the episode's series (empty if not an episode or
+// unknown), and the current unix time. building and returning an rpc Activity
+// based on the set options, the current jellyfin session, and the progress bar
 // calculated from the jellyfin session progress.
-func Build(opts Options, sess *jellyfin.Session, nowMillis int64) Activity {
+func Build(opts Options, sess *jellyfin.Session, seriesIDs jellyfin.ProviderIDs, nowMillis int64) Activity {
 	item := sess.NowPlayingItem
 
 	title, state, imageID := mediaDisplay(item, opts.UseEpisodeArt)
-	artworkURL := artworkURLFor(opts, imageID, item.ProviderIDs)
+	artworkURL := artworkURLFor(opts, imageID, item, seriesIDs)
 
 	p := Activity{
 		Title:      title,
@@ -74,21 +76,47 @@ func mediaDisplay(item jellyfin.NowPlayingItem, useEpisodeArt bool) (title, stat
 	return title, state, imageID
 }
 
-func artworkURLFor(opts Options, imageID string, ids jellyfin.ProviderIDs) string {
+func artworkURLFor(opts Options, imageID string, item jellyfin.NowPlayingItem, seriesIDs jellyfin.ProviderIDs) string {
 	if opts.Local {
-		if ids.Tmdb != "" {
-			return fmt.Sprintf("%s?tmdb=%s", bridgeAPI, ids.Tmdb)
+		// older bridges only read tmdb/imdb/tvdb and pick one themselves
+		// (tmdb > imdb > tvdb), so the extra params are safe to send them
+		ids := item.ProviderIDs
+		q := url.Values{}
+		setIfNotEmpty(q, "tmdb", ids.Tmdb)
+		setIfNotEmpty(q, "imdb", ids.Imdb)
+		setIfNotEmpty(q, "tvdb", ids.Tvdb)
+
+		if item.Type == "Episode" {
+			// episode ids are often missing on tmdb, the series ids let
+			// the bridge fall back to the series poster
+			setIfNotEmpty(q, "series_tmdb", seriesIDs.Tmdb)
+			setIfNotEmpty(q, "series_imdb", seriesIDs.Imdb)
+			setIfNotEmpty(q, "series_tvdb", seriesIDs.Tvdb)
 		}
-		if ids.Imdb != "" {
-			return fmt.Sprintf("%s?imdb=%s", bridgeAPI, ids.Imdb)
+
+		if len(q) == 0 {
+			return "jellyfin"
 		}
-		if ids.Tvdb != "" {
-			return fmt.Sprintf("%s?tvdb=%s", bridgeAPI, ids.Tvdb)
+
+		if item.Type == "Episode" {
+			q.Set("type", "episode")
+			if opts.UseEpisodeArt {
+				q.Set("art", "episode")
+			}
+		} else if item.Type == "Movie" {
+			q.Set("type", "movie")
 		}
-		return "jellyfin"
+
+		return fmt.Sprintf("%s?%s", bridgeAPI, q.Encode())
 	}
 
 	return fmt.Sprintf("%s/Items/%s/Images/Primary?fillWidth=400&quality=85", opts.JellyfinURL, imageID)
+}
+
+func setIfNotEmpty(q url.Values, key, val string) {
+	if val != "" {
+		q.Set(key, val)
+	}
 }
 
 func titleURLFor(ids jellyfin.ProviderIDs, enabled bool) string {
